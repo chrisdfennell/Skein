@@ -17,7 +17,7 @@ public static class Backup
     /// <summary>Small files in the data folder worth keeping (the offline library is optional).</summary>
     static readonly string[] LocalFiles =
     [
-        "user-notes.json", "alerts.json", "community-visits.json", "read.txt", "visits.json", "post-draft.json",
+        "user-notes.json", "alerts.json", "community-visits.json", "read.txt", "visits.json", "post-draft.json", "history.json",
     ];
 
     public sealed record Manifest(int Version, DateTimeOffset Created, string AppVersion, bool IncludesLibrary);

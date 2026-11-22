@@ -18,7 +18,7 @@ public partial class PostWindow : Window
         _detail.OpenUrlRequested += url =>
         {
             if (RedditLinks.Classify(url) is ThreadLink thread) _ = _detail.OpenThreadAsync(thread.PostId, thread.CommentId);
-            else main.OpenUrl(url);
+            else main.OpenUrlFromPage(url);
         };
         _detail.ExternalUrlRequested += url => main.OpenLinkCommand.Execute(url);
         _detail.StatusMessage += message => StatusText.Text = message;
@@ -27,10 +27,12 @@ public partial class PostWindow : Window
         _detail.RemindRequested += main.Remind;
         _detail.ComposeRequested += to => main.NewMessageCommand.Execute(to);
         _detail.PopOutRequested += main.PopOut;
+        _detail.VideoWindowRequested += (kind, url, poster, time, title) =>
+            new PlayerWindow(services, kind, url, poster, time, title, TaskbarExtras.WorkAreaOf(this) ?? SystemParameters.WorkArea).Show();
         _detail.KeyPressed += (key, ctrl, _) =>
         {
             if (key == "Escape" || (ctrl && key.Equals("w", StringComparison.OrdinalIgnoreCase))) Close();
-            else if (key == "R") _detail.ReadAloud();
+            else if (!ctrl && KeyMap.ActionFor(key, services.Settings.KeyBindings) == "readAloud") _detail.ReadAloud();
         };
         Loaded += async (_, _) =>
         {

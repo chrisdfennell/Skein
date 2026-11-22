@@ -51,7 +51,18 @@ public sealed class InAppBrowser(WebView2 view) : ObservableObject
     {
         if (_starting || _environment == null) return;
         _starting = true;
-        await view.EnsureCoreWebView2Async(_environment, _options);
+        try
+        {
+            await view.EnsureCoreWebView2Async(_environment, _options);
+        }
+        catch (Exception ex)
+        {
+            // Let the next link try again, and say why this one didn't open.
+            _starting = false;
+            IsLoading = false;
+            Title = $"Couldn't start the browser: {ex.Message}";
+            return;
+        }
         Appearance.ApplyToWebView(view.CoreWebView2, _theme);
         var core = view.CoreWebView2;
         await core.AddScriptToExecuteOnDocumentCreatedAsync(EscapeScript);

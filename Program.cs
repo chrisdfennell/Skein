@@ -95,7 +95,12 @@ public static class Program
         listener.Start();
 
         // …or handed us a link to open.
-        var links = new Thread(() => ReceiveLinks(url => app.Dispatcher.BeginInvoke(() => (app.MainWindow as MainWindow)?.OpenIncomingLink(url))))
+        // (Links that arrive before the window is up wait for it, rather than being dropped.)
+        var links = new Thread(() => ReceiveLinks(url => app.Dispatcher.BeginInvoke(() =>
+        {
+            if (app.MainWindow is MainWindow { IsLoaded: true } window) window.OpenIncomingLink(url);
+            else lock (PendingLinks) PendingLinks.Add(url);
+        })))
         { IsBackground = true, Name = "Skein link listener" };
         links.Start();
 
@@ -103,12 +108,26 @@ public static class Program
         instance.ReleaseMutex();
     }
 
+    /// <summary>Links handed over before the main window was ready; it opens them once loaded.</summary>
+    static readonly List<string> PendingLinks = [];
+
+    public static List<string> TakePendingLinks()
+    {
+        lock (PendingLinks)
+        {
+            var links = PendingLinks.ToList();
+            PendingLinks.Clear();
+            return links;
+        }
+    }
+
     /// <summary>Hands a link to the running copy. False if it isn't listening (an older version).</summary>
     static bool SendLink(string url)
     {
         try
         {
-            using var pipe = new NamedPipeClientStream(".", LinkPipeName, PipeDirection.Out);
+            // Only to a copy running as this Windows user (another user could otherwise create the pipe first).
+            using var pipe = new NamedPipeClientStream(".", LinkPipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);
             pipe.Connect(2000);
             using var writer = new StreamWriter(pipe);
             writer.Write(url);
@@ -126,12 +145,17 @@ public static class Program
         {
             try
             {
-                using var pipe = new NamedPipeServerStream(LinkPipeName, PipeDirection.In, 1);
+                using var pipe = new NamedPipeServerStream(LinkPipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.CurrentUserOnly);
                 pipe.WaitForConnection();
                 using var reader = new StreamReader(pipe);
-                var text = reader.ReadToEnd();
+                // Read at most 8 KB: anything longer isn't a link or a list of files.
+                var buffer = new char[8192];
+                var length = 0;
+                int read;
+                while (length < buffer.Length && (read = reader.Read(buffer, length, buffer.Length - length)) > 0) length += read;
+                if (length >= buffer.Length) continue;
+                var text = new string(buffer, 0, length);
                 // Only ever a web link or shared files; anything else is ignored.
-                if (text.Length >= 8192) continue;
                 if (text.StartsWith(AppCommands.FilesPrefix, StringComparison.Ordinal)) open(text);
                 else if (LinkHandler.NormalizeIncoming(text) is { } link) open(link);
             }

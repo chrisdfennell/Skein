@@ -1,48 +1,126 @@
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace Skein;
 
+/// <summary>Every keyboard shortcut, and changing the single-key ones.</summary>
 public partial class ShortcutsWindow : Window
 {
-    public ShortcutsWindow()
+    readonly AppSettings _settings;
+    readonly Dictionary<string, Button> _keyButtons = [];
+    string? _capturing;
+
+    public ShortcutsWindow(AppSettings settings)
     {
         InitializeComponent();
-        List.ItemsSource = new Dictionary<string, string>
+        _settings = settings;
+        Build();
+        PreviewTextInput += OnTextInput;
+        PreviewKeyDown += OnKeyDown;
+    }
+
+    void Build()
+    {
+        List.Children.Clear();
+        _keyButtons.Clear();
+        foreach (var group in KeyMap.Actions.GroupBy(a => a.Group))
         {
-            ["Ctrl+K"] = "Go anywhere: communities, folders, tabs and commands",
-            ["j / k"] = "Next / previous post",
-            ["Shift+J / K"] = "Next / previous top-level comment",
-            ["Shift+N"] = "Next comment that's new since your last visit",
-            ["Shift+P"] = "Next comment by the original poster",
-            ["Ctrl+B / I / K"] = "While writing: bold, italic, add a link",
-            ["Shift+R"] = "Read the post and its comments aloud (again to stop)",
-            ["v"] = "Picture viewer: ← → step through pictures and on to the next post, Space for a slideshow",
-            ["F11"] = "Full screen (Esc to leave)",
-            ["Ctrl+M"] = "Mini mode: a small always-on-top window with the current feed (Ctrl+M again to go back)",
-            ["Ctrl+F"] = "Find in thread",
-            ["d"] = "Download the post's images or video",
-            ["Space"] = "Scroll the post (Shift+Space scrolls back)",
-            ["a / z"] = "Upvote / downvote",
-            ["s"] = "Save or unsave",
-            ["x"] = "Hide the post",
-            ["o"] = "Open the link inside Skein",
-            ["Shift+O"] = "Open the link in your default browser",
-            ["f"] = "Reading mode (Esc to exit)",
-            ["+ / -"] = "Bigger / smaller text in the post view",
-            ["1 / 2 / 3"] = "Compact / Cards / Grid layout",
-            ["Esc"] = "Close the in-app browser or reading mode",
-            ["m"] = "Load more posts",
-            ["r / F5"] = "Refresh",
-            ["/ or Ctrl+L"] = "Search, or go to r/name or u/name",
-            ["n"] = "New post",
-            ["h"] = "Home",
-            ["i"] = "Inbox",
-            ["Ctrl+T"] = "New tab",
-            ["Ctrl+W"] = "Close tab",
-            ["Ctrl+Tab"] = "Next tab (Shift for previous)",
-            ["Middle-click"] = "Open a sidebar entry in a new tab",
-            ["Click a comment's line"] = "Collapse or expand the thread",
-            ["?"] = "This list",
+            List.Children.Add(new TextBlock { Text = group.Key, Style = (Style)FindResource("Group") });
+            var card = new StackPanel();
+            foreach (var action in group) card.Children.Add(Row(action));
+            List.Children.Add(new Border { Style = (Style)FindResource("Card"), Padding = new Thickness(16, 6, 16, 6), Child = card });
+        }
+        List.Children.Add(new TextBlock { Text = "Always", Style = (Style)FindResource("Group") });
+        var fixedCard = new StackPanel();
+        foreach (var (keys, label) in KeyMap.Fixed)
+        {
+            var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+            var key = new Border { Style = (Style)FindResource("KeyCap"), Child = new TextBlock { Text = keys, FontFamily = new System.Windows.Media.FontFamily("Consolas") } };
+            DockPanel.SetDock(key, Dock.Right);
+            row.Children.Add(key);
+            row.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+            fixedCard.Children.Add(row);
+        }
+        List.Children.Add(new Border { Style = (Style)FindResource("Card"), Padding = new Thickness(16, 6, 16, 6), Child = fixedCard });
+        ResetAll.IsEnabled = _settings.KeyBindings.Count > 0;
+    }
+
+    UIElement Row(KeyAction action)
+    {
+        var keys = KeyMap.Effective(_settings.KeyBindings);
+        var changed = keys[action.Id] != action.Default;
+        var button = new Button
+        {
+            MinWidth = 96,
+            Content = KeyMap.Display(keys[action.Id]),
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+            FontWeight = changed ? FontWeights.Bold : FontWeights.Normal,
+            ToolTip = changed ? $"Changed (standard: {KeyMap.Display(action.Default)}). Click to change." : "Click, then press the new key",
         };
+        AutomationProperties.SetName(button, $"{action.Label}: {KeyMap.Display(keys[action.Id])}. Change");
+        button.Click += (_, _) => StartCapture(action.Id);
+        _keyButtons[action.Id] = button;
+        var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3) };
+        DockPanel.SetDock(button, Dock.Right);
+        row.Children.Add(button);
+        row.Children.Add(new TextBlock { Text = action.Label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+        return row;
+    }
+
+    void StartCapture(string actionId)
+    {
+        if (_capturing != null && _keyButtons.TryGetValue(_capturing, out var previous)) previous.Content = KeyMap.Display(KeyMap.Effective(_settings.KeyBindings)[_capturing]);
+        _capturing = actionId;
+        _keyButtons[actionId].Content = "Press a key…";
+        ShowMessage(null);
+    }
+
+    void OnKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_capturing == null) return;
+        if (e.Key == Key.Escape)
+        {
+            _capturing = null;
+            Build();
+            e.Handled = true; // cancel the capture, not the window
+        }
+        else if (e.Key is Key.Space or Key.Enter or Key.Tab)
+        {
+            ShowMessage("Space, Enter and Tab can't be used. Pick a letter, number or symbol.");
+            e.Handled = true;
+        }
+    }
+
+    void OnTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (_capturing == null || !KeyMap.IsBindable(e.Text)) return;
+        e.Handled = true;
+        var action = KeyMap.Actions.First(a => a.Id == _capturing);
+        var before = KeyMap.Effective(_settings.KeyBindings);
+        var other = KeyMap.Actions.FirstOrDefault(a => a.Id != action.Id && before[a.Id] == e.Text);
+        KeyMap.Bind(_settings.KeyBindings, action.Id, e.Text);
+        _settings.Save();
+        _capturing = null;
+        Build();
+        ShowMessage(other == null
+            ? $"“{action.Label}” is now {KeyMap.Display(e.Text)}."
+            : $"“{action.Label}” is now {KeyMap.Display(e.Text)}, and “{other.Label}” moved to {KeyMap.Display(before[action.Id])}.");
+    }
+
+    void OnResetAll(object sender, RoutedEventArgs e)
+    {
+        _settings.KeyBindings.Clear();
+        _settings.Save();
+        _capturing = null;
+        Build();
+        ShowMessage("Every shortcut is back to its standard key.");
+    }
+
+    void ShowMessage(string? text)
+    {
+        Message.Text = text ?? "";
+        Message.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
     }
 }

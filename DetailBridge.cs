@@ -27,6 +27,9 @@ public sealed class DetailBridge(WebView2 view, Services services)
     string _commentSort = "confidence";
 
     public event Action<string>? OpenUrlRequested;      // route in-app when it's a Reddit link
+
+    /// <summary>The thread showing (null for messages, pages and nothing).</summary>
+    public string? ShownPostId => _postId;
     public event Action<string>? ExternalUrlRequested;  // always the default browser
     public event Action<string, bool, bool>? KeyPressed;          // key, ctrl, shift
     public event Action<string, bool?, bool?>? PostStateChanged;  // fullname, likes (if voted), saved (if saved)
@@ -93,7 +96,8 @@ public sealed class DetailBridge(WebView2 view, Services services)
         savedReplies = services.Settings.SavedReplies.Select(r => new { name = r.Name, text = r.Text }),
         translate = services.Settings.TranslateEnabled,
         summaries = services.Summarizer.IsReady,
-        reminded = services.Settings.Reminders.Select(r => r.PostId),
+        keys = KeyMap.Effective(services.Settings.KeyBindings),
+        reminded = services.Settings.Reminders.Where(r => !r.Fired).Select(r => r.PostId),
         // Lower-cased names → your tag and note on that user.
         notes = services.UserNotes.All.ToDictionary(n => n.Key.ToLowerInvariant(), n => new { tag = n.Value.Tag, note = n.Value.Note }),
     });
@@ -136,6 +140,21 @@ public sealed class DetailBridge(WebView2 view, Services services)
             // Visit tracking is best-effort.
         }
         return _previousVisitAt;
+    }
+
+    /// <summary>Adds the thread's post to 🕘 History.</summary>
+    void RecordHistory(string threadRaw)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(threadRaw);
+            var post = doc.RootElement[0].GetProperty("data").GetProperty("children")[0].GetProperty("data");
+            services.History.Record(post.Str("name"), post.GetRawText());
+        }
+        catch
+        {
+            // History is a nicety.
+        }
     }
 
     public void Clear()
@@ -283,6 +302,7 @@ public sealed class DetailBridge(WebView2 view, Services services)
         }
 
         if (version != _version) return;
+        if (!offline) RecordHistory(raw);
         var lastVisit = TakeVisit(postId, raw, record: !offline && focusCommentId == null);
         // Offline copies use their saved media. Online, always use Reddit's: the saved video has
         // no sound track, so using it would silence a video that plays fine online.
@@ -678,6 +698,8 @@ public sealed class DetailBridge(WebView2 view, Services services)
             case "laterCancel":
                 {
                     var id = m.Str("id");
+                    // Being posted this moment: too late to cancel (it would go up anyway).
+                    if (IsPosting?.Invoke(id) == true) throw new InvalidOperationException("It's being posted right now, so it can't be cancelled.");
                     services.Settings.Reminders.RemoveAll(r => r.Id == id);
                     services.Settings.ScheduledPosts.RemoveAll(p => p.Id == id);
                     services.Settings.Save();
@@ -730,6 +752,9 @@ public sealed class DetailBridge(WebView2 view, Services services)
         }
     }
 
+    /// <summary>Whether a scheduled post is going out right now (it can't be cancelled then).</summary>
+    public Func<string, bool>? IsPosting { get; set; }
+
     /// <summary>Your reminders and scheduled posts, soonest first, for the "later" page.</summary>
     public string LaterJson() => JsonSerializer.Serialize(new
     {
@@ -741,6 +766,7 @@ public sealed class DetailBridge(WebView2 view, Services services)
             sub = r.Subreddit,
             permalink = r.Permalink,
             due = r.Due,
+            fired = r.Fired,
         }),
         scheduled = services.Settings.ScheduledPosts.OrderBy(p => p.Due).Select(p => new
         {
@@ -752,6 +778,7 @@ public sealed class DetailBridge(WebView2 view, Services services)
             error = p.Error,
             user = p.UserName,
             otherAccount = p.Profile != services.Settings.ActiveProfile,
+            posting = IsPosting?.Invoke(p.Id) == true,
         }),
     });
 

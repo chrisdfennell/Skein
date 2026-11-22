@@ -91,6 +91,7 @@ public sealed class SettingsSync(AppSettings settings, UserNotes notes, Action? 
         ["searches"] = JsonSerializer.Serialize(settings.SavedSearches),
         ["reminders"] = JsonSerializer.Serialize(settings.Reminders.OrderBy(r => r.Id, StringComparer.Ordinal)),
         ["replies"] = JsonSerializer.Serialize(settings.SavedReplies),
+        ["keys"] = JsonSerializer.Serialize(settings.KeyBindings.OrderBy(k => k.Key, StringComparer.Ordinal).ToDictionary(k => k.Key, k => k.Value)),
         ["sorts"] = JsonSerializer.Serialize(settings.CommunitySorts.OrderBy(s => s.Key, StringComparer.Ordinal).ToDictionary(s => s.Key, s => s.Value)),
         ["watching"] = JsonSerializer.Serialize(new
         {
@@ -159,6 +160,9 @@ public sealed class SettingsSync(AppSettings settings, UserNotes notes, Action? 
                 break;
             case "sorts":
                 settings.CommunitySorts = data.Deserialize<Dictionary<string, string>>() ?? [];
+                break;
+            case "keys":
+                settings.KeyBindings = data.Deserialize<Dictionary<string, string>>() ?? [];
                 break;
             case "replies":
                 settings.SavedReplies = data.Deserialize<List<SavedReply>>() ?? [];

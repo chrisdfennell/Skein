@@ -103,7 +103,7 @@ public sealed partial class MainViewModel
                 post.AuthorTag = _services.UserNotes.Get(post.Author)?.Tag ?? "";
         if (sections.Contains("filters"))
             foreach (var tab in Tabs.Where(t => t != SelectedTab)) tab.MarkStale();
-        if (sections.Contains("notes") || sections.Contains("filters") || sections.Contains("replies") || sections.Contains("reminders"))
+        if (sections.Contains("notes") || sections.Contains("filters") || sections.Contains("replies") || sections.Contains("reminders") || sections.Contains("keys"))
             _detail.RefreshSettings();
         if (sections.Contains("reminders")) _detail.RefreshLater();
         if (sections.Contains("appearance"))

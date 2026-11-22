@@ -3,7 +3,7 @@ using System.Windows.Input;
 
 namespace Skein;
 
-public enum FeedKind { Home, Subreddit, Search, User, Saved, Inbox, Offline, ModQueue, Folder, Alerts }
+public enum FeedKind { Home, Subreddit, Search, User, Saved, Inbox, Offline, ModQueue, Folder, Alerts, History }
 
 /// <summary>
 /// A feed's identity as text, used to save open tabs and in sidebar links: "home", "r/name",
@@ -38,6 +38,7 @@ public readonly record struct FeedSpec(FeedKind Kind, string Target = "", string
             "inbox" => new FeedSpec(FeedKind.Inbox),
             "offline" => new FeedSpec(FeedKind.Offline),
             "alerts" => new FeedSpec(FeedKind.Alerts),
+            "history" => new FeedSpec(FeedKind.History),
             _ => null,
         };
     }
@@ -53,6 +54,7 @@ public readonly record struct FeedSpec(FeedKind Kind, string Target = "", string
         FeedKind.ModQueue => "mod:" + Target,
         FeedKind.Folder => "folder:" + Target,
         FeedKind.Alerts => "alerts",
+        FeedKind.History => "history",
         _ => "offline",
     };
 }
@@ -185,6 +187,7 @@ public sealed class FeedViewModel : ObservableObject
         FeedKind.ModQueue => IsAllModQueue ? "🛡 Mod queue" : $"🛡 r/{Target}",
         FeedKind.Folder => "📁 " + Target,
         FeedKind.Alerts => "🔔 Alerts",
+        FeedKind.History => "🕘 History",
         _ => "📥 Offline",
     };
 
@@ -340,11 +343,14 @@ public sealed class FeedViewModel : ObservableObject
     /// </summary>
     public async Task CheckForNewAsync()
     {
-        if (!_loaded || IsLoading || _checkingForNew || Kind is FeedKind.Offline or FeedKind.Saved or FeedKind.Alerts) return;
+        if (!_loaded || IsLoading || _checkingForNew || Kind is FeedKind.Offline or FeedKind.Saved or FeedKind.Alerts or FeedKind.History) return;
         _checkingForNew = true;
         try
         {
+            var reloads = _reloads;
             var (items, _) = await _services.Api.GetListingAsync(BuildPath(), null, default);
+            // Reloaded meanwhile: this answer is about a list that's gone, and everything would look new.
+            if (reloads != _reloads || IsLoading || Posts.Count == 0) return;
             // Only genuinely new items: ranked feeds (best, hot) reshuffle all the time, so
             // "not loaded yet" alone would count old posts that just moved up.
             var newest = Posts.Count > 0 ? Posts.Max(p => p.Created) : DateTimeOffset.MinValue;
@@ -463,6 +469,9 @@ public sealed class FeedViewModel : ObservableObject
 
     public bool IsOffline => Kind == FeedKind.Offline;
 
+    /// <summary>🕘 History: searchable like the library (by title, community, author or site).</summary>
+    public bool IsHistory => Kind == FeedKind.History;
+
     string _libraryQuery = "";
     public string LibraryQuery
     {
@@ -497,8 +506,12 @@ public sealed class FeedViewModel : ObservableObject
     /// <summary>Loads the next page, if there is one (the picture viewer walks past the end).</summary>
     public Task LoadMoreAsync() => HasMore && !IsLoading ? LoadPageAsync(_cts?.Token ?? default) : Task.CompletedTask;
 
+    /// <summary>Counts reloads, so a check for new posts that straddles one is ignored.</summary>
+    int _reloads;
+
     public async Task ReloadAsync()
     {
+        _reloads++;
         IsAsleep = false;
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
@@ -532,6 +545,19 @@ public sealed class FeedViewModel : ObservableObject
                 Status = Posts.Count == 0
                     ? filtered ? "No saved posts match." : "Nothing saved offline yet. Saving a post keeps a copy here."
                     : $"{Posts.Count} posts in your offline library";
+                return;
+            }
+
+            if (Kind == FeedKind.History)
+            {
+                foreach (var (post, _) in _services.History.List(LibraryQuery))
+                {
+                    post.IsRead = false; // everything here was opened; don't dim it all
+                    AddPost(post);
+                }
+                Status = Posts.Count == 0
+                    ? LibraryQuery.Length > 0 ? "Nothing you've opened matches." : "Posts you open show up here."
+                    : $"{Posts.Count} posts you've opened";
                 return;
             }
 
@@ -666,7 +692,7 @@ public sealed class FeedViewModel : ObservableObject
     {
         var s = _services.Settings;
         // Queues must show everything waiting for review, whatever your personal filters say.
-        if (Kind is FeedKind.Saved or FeedKind.Inbox or FeedKind.ModQueue or FeedKind.Alerts) return false;
+        if (Kind is FeedKind.Saved or FeedKind.Inbox or FeedKind.ModQueue or FeedKind.Alerts or FeedKind.History) return false;
         if (Kind != FeedKind.User && _services.IsMuted(p.Author)) return true;
         if (s.HideNsfw && p.Over18 && (IsAggregate || Kind == FeedKind.User)) return true;
         if (s.HideRead && p.IsRead && Kind is FeedKind.Home or FeedKind.Subreddit or FeedKind.Search) return true;
@@ -756,6 +782,12 @@ public sealed class FeedViewModel : ObservableObject
                     HeaderActionLabel = "Manage alerts…";
                     break;
 
+                case FeedKind.History:
+                    HeaderTitle = "History";
+                    HeaderText = $"Posts you've opened on this PC, newest first (the last {HistoryStore.MaxEntries:N0}).";
+                    HeaderActionLabel = "Clear history";
+                    break;
+
                 case FeedKind.Inbox:
                     HeaderTitle = "Inbox";
                     HeaderText = "Replies, mentions and private messages.";
@@ -797,6 +829,12 @@ public sealed class FeedViewModel : ObservableObject
             if (Kind == FeedKind.Alerts)
             {
                 ManageAlertsRequested?.Invoke();
+            }
+            else if (Kind == FeedKind.History)
+            {
+                _services.History.Clear();
+                await ReloadAsync();
+                Status = "History cleared.";
             }
             else if (Kind == FeedKind.User)
             {

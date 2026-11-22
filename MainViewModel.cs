@@ -66,7 +66,7 @@ public sealed partial class MainViewModel : ObservableObject
             Favorites = new ObservableCollection<string>(DemoFavorites);
         }
 
-        _detail.OpenUrlRequested += url => OpenUrl(url);
+        _detail.OpenUrlRequested += OpenUrlFromPage;
         _detail.ExternalUrlRequested += url => OpenLink(url);
         _detail.KeyPressed += (key, ctrl, shift) => HandleKey(key, ctrl, shift);
         _detail.StatusMessage += message => Status = message;
@@ -80,6 +80,7 @@ public sealed partial class MainViewModel : ObservableObject
         _detail.PopOutRequested += id => PopOutRequested?.Invoke(id);
         _detail.LaterChanged += () => Status = "Cancelled.";
         _detail.PostNowRequested += id => _ = PostScheduledAsync(id, now: true);
+        _detail.IsPosting = id => id == _postingId;
         _laterTimer.Tick += async (_, _) => await CheckLaterAsync();
         _laterTimer.Start();
         _detail.MediaStepHandler = StepToPicturesAsync;
@@ -136,7 +137,11 @@ public sealed partial class MainViewModel : ObservableObject
         ContinueAnywayCommand = new RelayCommand(_ => _ = TryCompleteLoginAsync(force: true), _ => !_checkingLogin);
         PreferencesCommand = new RelayCommand(_ => ShowPreferences());
         SubmitCommand = new RelayCommand(_ => ShowSubmit(), _ => _isReady);
-        ShortcutsCommand = new RelayCommand(_ => new ShortcutsWindow { Owner = Application.Current.MainWindow }.ShowDialog());
+        ShortcutsCommand = new RelayCommand(_ =>
+        {
+            new ShortcutsWindow(Settings) { Owner = Application.Current.MainWindow }.ShowDialog();
+            _detail.RefreshSettings(); // the post view handles a few keys itself
+        });
         RefreshSubscriptionsCommand = new RelayCommand(_ => _ = LoadSubscriptionsAsync(), _ => _isReady);
         ToggleSubscriptionSortCommand = new RelayCommand(_ => ToggleSubscriptionSort());
         CleanupSubscriptionsCommand = new RelayCommand(_ => ShowCleanup(), _ => _isReady);
@@ -339,6 +344,7 @@ public sealed partial class MainViewModel : ObservableObject
         new("🔥 Popular", "r/popular", IsFeed: true),
         new("🌐 All", "r/all", IsFeed: true),
         new("★ Saved", "saved"),
+        new("🕘 History", "history"),
         new("✉ Inbox", "inbox"),
         new("📥 Offline library", "offline"),
         new("🔔 Alerts", "alerts"),
@@ -477,6 +483,7 @@ public sealed partial class MainViewModel : ObservableObject
     public void OnExit()
     {
         if (Settings.SyncEnabled) _sync.RunOnce(); // last changes out before closing
+        _services.History.Save();
         if (Settings.AutoUpdate && _updates.IsUpdateReady) _updates.ApplyOnExit();
     }
 
@@ -738,47 +745,67 @@ public sealed partial class MainViewModel : ObservableObject
             }
         }
 
+        // Keys that can't be changed.
         switch (key)
         {
             case "Escape" when IsFullscreen: FullscreenRequested?.Invoke(false); return true;
             case "Escape" when ShowBrowser: ShowBrowser = false; return true;
             case "Escape" when IsReadingMode: IsReadingMode = false; return true;
-            case "f": IsReadingMode = !IsReadingMode; return true;
-            case "x": _ = HideAsync(SelectedPost); return true;
-            case "N": _detail.NextNewComment(); return true;
-            case "P": _detail.NextOpComment(); return true;
             case "F11": FullscreenRequested?.Invoke(null); return true;
-            case "d": _detail.RequestDownload(); return true;
-            case "v": _detail.OpenViewer(); return true;
-            case "R": _detail.ReadAloud(); return true;
-            case "J": _detail.NavigateComments(1); return true;
-            case "K": _detail.NavigateComments(-1); return true;
-            case "+" or "=": ReadingFontSize++; return true;
-            case "-": ReadingFontSize--; return true;
-            case "1": LayoutMode = "Compact"; return true;
-            case "2": LayoutMode = "Cards"; return true;
-            case "3": LayoutMode = "Grid"; return true;
-            case "j": MoveSelection(1); return true;
-            case "k": MoveSelection(-1); return true;
-            case "a": _ = VoteAsync(SelectedPost, up: true); return true;
-            case "z": _ = VoteAsync(SelectedPost, up: false); return true;
-            case "s": _ = ToggleSaveAsync(SelectedPost); return true;
-            case "o":
-                if (SelectedPost != null) OpenLink(SelectedPost.HasLink ? SelectedPost.Url : SelectedPost.PermalinkUrl);
+            case "F5": RefreshCommand.Execute(null); return true;
+            case " ": _detail.Scroll(shift ? -1 : 1); return true;
+        }
+
+        // The rest are yours to change (Keyboard shortcuts, ?).
+        switch (KeyMap.ActionFor(key, Settings.KeyBindings))
+        {
+            case "reading": IsReadingMode = !IsReadingMode; return true;
+            case "hide": _ = HideAsync(KeyTarget()); return true;
+            case "nextNew": _detail.NextNewComment(); return true;
+            case "nextOp": _detail.NextOpComment(); return true;
+            case "download": _detail.RequestDownload(); return true;
+            case "viewer": _detail.OpenViewer(); return true;
+            case "readAloud": _detail.ReadAloud(); return true;
+            case "nextComment": _detail.NavigateComments(1); return true;
+            case "previousComment": _detail.NavigateComments(-1); return true;
+            case "bigger": ReadingFontSize++; return true;
+            case "smaller": ReadingFontSize--; return true;
+            case "compact": LayoutMode = "Compact"; return true;
+            case "cards": LayoutMode = "Cards"; return true;
+            case "grid": LayoutMode = "Grid"; return true;
+            case "next": MoveSelection(1); return true;
+            case "previous": MoveSelection(-1); return true;
+            case "upvote": _ = VoteAsync(KeyTarget(), up: true); return true;
+            case "downvote": _ = VoteAsync(KeyTarget(), up: false); return true;
+            case "save": _ = ToggleSaveAsync(KeyTarget()); return true;
+            case "open":
+                if (KeyTarget() is { } toOpen) OpenLink(toOpen.HasLink ? toOpen.Url : toOpen.PermalinkUrl);
                 return true;
-            case "O": if (SelectedPost != null) OpenExternal(SelectedPost.HasLink ? SelectedPost.Url : SelectedPost.PermalinkUrl); return true;
-            case "r": case "F5": RefreshCommand.Execute(null); return true;
-            case "m":
+            case "openExternal": if (KeyTarget() is { } external) OpenExternal(external.HasLink ? external.Url : external.PermalinkUrl); return true;
+            case "refresh": RefreshCommand.Execute(null); return true;
+            case "loadMore":
                 if (SelectedTab?.LoadMoreCommand.CanExecute(null) == true) SelectedTab.LoadMoreCommand.Execute(null);
                 return true;
-            case "/": FocusSearchRequested?.Invoke(); return true;
-            case "n": SubmitCommand.Execute(null); return true;
-            case "i": OpenFeed("inbox", newTab: false); return true;
-            case "h": OpenFeed("home", newTab: false); return true;
-            case " ": _detail.Scroll(shift ? -1 : 1); return true;
-            case "?": ShortcutsCommand.Execute(null); return true;
+            case "search": FocusSearchRequested?.Invoke(); return true;
+            case "newPost": SubmitCommand.Execute(null); return true;
+            case "inbox": OpenFeed("inbox", newTab: false); return true;
+            case "home": OpenFeed("home", newTab: false); return true;
+            case "shortcuts": ShortcutsCommand.Execute(null); return true;
             default: return false;
         }
+    }
+
+    /// <summary>
+    /// The post the vote, save, hide and open keys act on: the list's selected post, but only while
+    /// it's the one showing. After following a link to another thread they'd otherwise act on a post
+    /// you can't see.
+    /// </summary>
+    Post? KeyTarget()
+    {
+        if (SelectedPost is not { } post) return null;
+        if (post.Kind != ItemKind.Link || _detail.ShownPostId == null || _detail.ShownPostId == post.Id) return post;
+        Status = "That key acts on the post selected in the list. For this one, use the buttons in the post.";
+        return null;
     }
 
     void MoveSelection(int delta)
@@ -850,8 +877,10 @@ public sealed partial class MainViewModel : ObservableObject
         _isReady = false;
         _inboxTimer.Stop();
         ShowLogin = true;
-        LoginMessage = "Sign in to Reddit below. Skein reads Reddit through your own session, " +
-                       "so your password only goes to Reddit. You'll stay signed in next time.";
+        LoginMessage = _services.Session.Blocked
+            ? RedditApi.BlockedMessage + " Signing in again won't change that. Reddit's page offers a ticket form if you think it's a mistake."
+            : "Sign in to Reddit below. Skein reads Reddit through your own session, " +
+              "so your password only goes to Reddit. You'll stay signed in next time.";
         _ = _services.Session.NavigateAsync(RedditSession.LoginPage);
     }
 
@@ -937,15 +966,30 @@ public sealed partial class MainViewModel : ObservableObject
 
         LogStartup("signed in, tabs open");
 
+        // First time: a short tour (once the window has settled).
+        if (!Settings.WelcomeShown && !DemoMode)
+            _ = Application.Current.Dispatcher.BeginInvoke(ShowWelcome, DispatcherPriority.ApplicationIdle);
+
         // A link another app handed over before Skein was ready.
         if (_pendingUrl is { } pending)
         {
             _pendingUrl = null;
             OpenUrl(pending);
         }
+        var waiting = _whenReady.ToList();
+        _whenReady.Clear();
+        foreach (var action in waiting) action();
     }
 
     string? _pendingUrl;
+    readonly List<Action> _whenReady = [];
+
+    /// <summary>Runs now if signed in and ready, or as soon as that's done (a notification clicked at startup).</summary>
+    public void WhenReady(Action action)
+    {
+        if (_isReady) action();
+        else _whenReady.Add(action);
+    }
 
     /// <summary>Notes in api.log how long start-up took to reach a step (to spot slow starts).</summary>
     static void LogStartup(string step)

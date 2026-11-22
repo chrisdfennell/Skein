@@ -80,6 +80,18 @@ public sealed partial class MainViewModel
         foreach (var tab in Tabs.Where(t => t.Kind == FeedKind.Inbox && t.Sort == "sent")) tab.MarkStale();
     }
 
+    /// <summary>The welcome tour (shown once after the first sign-in; again from Help or Ctrl+K).</summary>
+    void ShowWelcome() => ShowWelcome(offerPreferences: true);
+
+    void ShowWelcome(bool offerPreferences)
+    {
+        Settings.WelcomeShown = true;
+        Settings.Save();
+        var window = new WelcomeWindow(Settings, offerPreferences) { Owner = ActiveWindow };
+        window.ShowDialog();
+        if (window.OpenPreferences) ShowPreferences();
+    }
+
     void ShowReportProblem() =>
         new ReportProblemWindow(_updates.CurrentVersion, _updates.Kind, Settings.UpdateUrl, _services.Api.UserName)
         {
@@ -92,6 +104,7 @@ public sealed partial class MainViewModel
         var (syncWas, syncFolderWas) = (Settings.SyncEnabled, Settings.SyncFolder);
         var window = new PreferencesWindow(Settings, _updates, SyncStatus) { Owner = Application.Current.MainWindow };
         window.ReportProblemRequested += () => ShowReportProblem();
+        window.WelcomeRequested += () => ShowWelcome(offerPreferences: false); // Preferences is already open
         var saved = window.ShowDialog() == true;
         if (window.RestartToRestore)
         {

@@ -25,10 +25,12 @@ public partial class CommandPaletteWindow : Window
             // Near the top of the main window, like a browser's address bar.
             if (Owner != null)
             {
-                // A maximized window's Left/Top are its restored position, so use the screen then.
+                // A maximized window's Left/Top are its restored position, so use its screen then
+                // (the one it's on, not necessarily the main one).
                 var maximized = Owner.WindowState == WindowState.Maximized;
-                var left = maximized ? SystemParameters.WorkArea.Left : Owner.Left;
-                var top = maximized ? SystemParameters.WorkArea.Top : Owner.Top;
+                var screen = TaskbarExtras.WorkAreaOf(Owner) ?? SystemParameters.WorkArea;
+                var left = maximized ? screen.Left : Owner.Left;
+                var top = maximized ? screen.Top : Owner.Top;
                 Left = left + (Owner.ActualWidth - ActualWidth) / 2;
                 Top = top + 90;
             }

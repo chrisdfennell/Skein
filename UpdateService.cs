@@ -102,6 +102,18 @@ public sealed partial class UpdateService(AppSettings settings)
 
     bool IsCurrent(int generation) => generation == Volatile.Read(ref _generation);
 
+    static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // Cleared at the next start.
+        }
+    }
+
     /// <summary>Checks for an update and downloads it. Returns a message for the user.</summary>
     Task<string>? _check;
 
@@ -191,16 +203,28 @@ public sealed partial class UpdateService(AppSettings settings)
 
         // Download beside the current exe so the swap on restart is a cheap rename.
         var target = Environment.ProcessPath! + ".new";
+        // A download that stalls must not hold up every later check (they wait on this one).
+        using var stall = new CancellationTokenSource(TimeSpan.FromMinutes(15));
         try
         {
-            using var download = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            using var download = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token);
             download.EnsureSuccessStatusCode();
             await using (var file = File.Create(target))
-                await download.Content.CopyToAsync(file);
+                await download.Content.CopyToAsync(file, stall.Token);
         }
         catch (UnauthorizedAccessException)
         {
             return $"Version {tag} is out, but Skein can't write to its folder. Download it from the releases page.";
+        }
+        catch (OperationCanceledException)
+        {
+            TryDelete(target);
+            return $"Version {tag} is out, but the download stalled. Skein will try again later.";
+        }
+        catch
+        {
+            TryDelete(target); // never leave half an exe to be mistaken for the update
+            throw;
         }
 
         if (!IsCurrent(generation))

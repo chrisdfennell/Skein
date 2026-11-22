@@ -1,0 +1,27 @@
+<Window x:Class="Skein.WelcomeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to Skein" Width="640" Height="540" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Style="{StaticResource ButtonBar}">
+            <DockPanel>
+                <Button x:Name="SkipButton" Content="Skip the tour" Click="OnSkip" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BackButton" Content="Back" MinWidth="90" Click="OnBack" />
+                    <Button x:Name="NextButton" Content="Next" MinWidth="110" Margin="8,0,0,0" IsDefault="True" Click="OnNext"
+                            Style="{DynamicResource AccentButtonStyle}" />
+                </StackPanel>
+                <!-- Where you are in the tour. -->
+                <ItemsControl x:Name="Dots" HorizontalAlignment="Center" VerticalAlignment="Center" Focusable="False">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </DockPanel>
+        </Border>
+        <ContentControl x:Name="Page" Margin="36,28,36,16" Focusable="False" />
+    </DockPanel>
+</Window>

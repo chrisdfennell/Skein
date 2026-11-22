@@ -43,7 +43,11 @@ public sealed class Translator(AppSettings settings)
             var data = doc.RootElement.GetProperty("responseData");
             if (doc.RootElement.TryGetProperty("quotaFinished", out var quota) && quota.ValueKind == JsonValueKind.True)
                 throw new InvalidOperationException("The free translation service's daily limit is used up. Try again tomorrow.");
-            var status = doc.RootElement.TryGetProperty("responseStatus", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt32() : 200;
+            // MyMemory sends the status as a number when all is well and as a string ("403") on errors.
+            var status = !doc.RootElement.TryGetProperty("responseStatus", out var s) ? 200
+                : s.ValueKind == JsonValueKind.Number ? s.GetInt32()
+                : s.ValueKind == JsonValueKind.String && int.TryParse(s.GetString(), out var parsed) ? parsed
+                : 200;
             if (status != 200) throw new InvalidOperationException(data.Str("translatedText") is { Length: > 0 } why ? why : $"Translation failed ({status}).");
             if (from.Length == 0) from = data.Str("detectedLanguage");
             output.Append(System.Net.WebUtility.HtmlDecode(data.Str("translatedText")));

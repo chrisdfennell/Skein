@@ -157,7 +157,7 @@ public sealed partial class RedditApi(RedditSession session)
     /// </summary>
     public async Task<(int Status, DateTimeOffset? Newest)> GetNewestPostAsync(string subreddit, CancellationToken ct)
     {
-        var (status, body) = await session.GetAsync($"{Base}/r/{Uri.EscapeDataString(subreddit)}/new.json?limit=1&raw_json=1", ct);
+        var (status, body) = await FetchAsync($"{Base}/r/{Uri.EscapeDataString(subreddit)}/new.json?limit=1&raw_json=1", ct);
         if (status is < 200 or >= 300 || !LooksLikeJson(body)) return (status, null);
         try
         {
@@ -187,6 +187,7 @@ public sealed partial class RedditApi(RedditSession session)
 
     public async Task<SubredditInfo?> GetSubredditAboutAsync(string name, CancellationToken ct)
     {
+        if (!NameChars().IsMatch(name)) throw new InvalidOperationException("That isn't a community name.");
         using var doc = await GetJsonAsync($"{Base}/r/{name}/about.json?raw_json=1", ct);
         var d = doc.RootElement.GetProperty("data");
         return new SubredditInfo(d.Str("display_name"), d.Str("title"), d.Long("subscribers"),
@@ -289,7 +290,8 @@ public sealed partial class RedditApi(RedditSession session)
     public async Task<List<Post>> GetPostsInfoAsync(IReadOnlyList<string> postIds, CancellationToken ct)
     {
         var posts = new List<Post>();
-        foreach (var chunk in postIds.Where(id => System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9]+$")).Chunk(100))
+        // 50 at a time: the listing asks for 50 results, so a bigger batch would come back cut short.
+        foreach (var chunk in postIds.Where(id => System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9]+$")).Chunk(50))
         {
             var (items, _) = await GetListingAsync($"/api/info.json?id={string.Join(",", chunk.Select(id => "t3_" + id))}", null, ct);
             posts.AddRange(items.Where(p => p.Kind == ItemKind.Link));
@@ -313,6 +315,7 @@ public sealed partial class RedditApi(RedditSession session)
 
     public async Task<UserInfo?> GetUserAboutAsync(string name, CancellationToken ct)
     {
+        if (!NameChars().IsMatch(name)) throw new InvalidOperationException("That isn't a username.");
         using var doc = await GetJsonAsync($"{Base}/user/{name}/about.json?raw_json=1", ct);
         var d = doc.RootElement.GetProperty("data");
         var icon = d.Str("snoovatar_img") is { Length: > 0 } s ? s : d.Str("icon_img");
@@ -343,7 +346,7 @@ public sealed partial class RedditApi(RedditSession session)
         bool? expected = direction switch { 1 => true, -1 => false, _ => null };
         foreach (var oauthFirst in new[] { false, true })
         {
-            using (await PostAsync("/api/vote", new() { ["id"] = fullName, ["dir"] = direction.ToString() }, oauthFirst))
+            using (await PostAsync("/api/vote", new() { ["id"] = fullName, ["dir"] = direction.ToString(System.Globalization.CultureInfo.InvariantCulture) }, oauthFirst))
             {
             }
             var recorded = await GetLikesAsync(fullName);
@@ -441,7 +444,7 @@ public sealed partial class RedditApi(RedditSession session)
             ["ban_message"] = message,
             ["note"] = note,
         };
-        if (days > 0) form["duration"] = Math.Min(days, 999).ToString();
+        if (days > 0) form["duration"] = Math.Min(days, 999).ToString(System.Globalization.CultureInfo.InvariantCulture);
         using var _ = await PostAsync($"/r/{subreddit}/api/friend", form);
     }
 
@@ -752,19 +755,7 @@ public sealed partial class RedditApi(RedditSession session)
 
     async Task<string> GetBodyAsync(string url, CancellationToken ct)
     {
-        // Stay inside Reddit's allowance, and after "too many requests" wait and try again (twice).
-        int status;
-        string body;
-        for (var attempt = 0; ; attempt++)
-        {
-            await session.RateLimit.WaitAsync(ct);
-            (status, body) = await session.GetAsync(url, ct);
-            if (status != 429 || attempt >= 2) break;
-            ApiLog.Write($"GET rate limited; waiting before try {attempt + 2}");
-            var wait = session.RateLimit.Delay();
-            await Task.Delay(wait > TimeSpan.FromSeconds(2) ? wait : TimeSpan.FromSeconds(2 * (attempt + 1)), ct);
-        }
-
+        var (status, body) = await FetchAsync(url, ct);
         switch (status)
         {
             case 401:
@@ -787,6 +778,49 @@ public sealed partial class RedditApi(RedditSession session)
     }
 
     /// <summary>
+    /// A GET with the session's cookies, waiting inside Reddit's allowance and retrying after
+    /// "too many requests". Returns Reddit's answer; refusals are logged with what the page said.
+    /// </summary>
+    async Task<(int Status, string Body)> FetchAsync(string url, CancellationToken ct)
+    {
+        int status;
+        string body;
+        for (var attempt = 0; ; attempt++)
+        {
+            await session.RateLimit.WaitAsync(ct);
+            (status, body) = await session.GetAsync(url, ct);
+            if (status != 429 || attempt >= 2) break;
+            ApiLog.Write($"GET rate limited; waiting before try {attempt + 2}");
+            var wait = session.RateLimit.Delay();
+            await Task.Delay(wait > TimeSpan.FromSeconds(2) ? wait : TimeSpan.FromSeconds(2 * (attempt + 1)), ct);
+        }
+        if (status is < 200 or >= 300 || !LooksLikeJson(body))
+            ApiLog.Write($"GET {ApiLog.PathOf(url)} -> HTTP {status}: {ApiLog.Clip(body)}");
+        if (IsBlockPage(body)) throw new InvalidOperationException(BlockedMessage);
+        return (status, body);
+    }
+
+    /// <summary>Reddit's "You've been blocked by network security" page.</summary>
+    public static bool IsBlockPage(string body) =>
+        !LooksLikeJson(body) && body.Contains("blocked by network security", StringComparison.OrdinalIgnoreCase);
+
+    public const string BlockedMessage =
+        "Reddit is blocking Skein's requests right now (“You've been blocked by network security”). " +
+        "Skein can't load anything until Reddit lifts the block.";
+    /// <summary>
+    /// Requests that would do their thing twice if sent twice: a second comment, post or message.
+    /// These are never resent after an answer that leaves it unclear whether Reddit acted.
+    /// </summary>
+    public static bool RepeatsAreHarmful(string path) =>
+        path is "/api/comment" or "/api/submit" or "/api/compose" or "/api/submit_gallery_post.json" or "/api/submit_gallery_post"
+        || path.StartsWith("/api/v1/modactions/removal_", StringComparison.Ordinal) && path.EndsWith("_message", StringComparison.Ordinal)
+        || path.StartsWith("/api/mod/conversations/", StringComparison.Ordinal) && path.Count(c => c == '/') == 4; // a modmail reply
+
+    /// <summary>Said when Reddit may or may not have acted, so the user checks before trying again.</summary>
+    public const string MaybeSentMessage =
+        "Reddit had a problem answering just now, so it may or may not have gone through. Check before trying again, so it isn't sent twice.";
+
+    /// <summary>
     /// Sends a form POST. Tries the classic cookie + modhash route first, then falls back to
     /// oauth.reddit.com with the session's bearer cookie, which is what reddit.com itself uses.
     /// </summary>
@@ -794,10 +828,22 @@ public sealed partial class RedditApi(RedditSession session)
     {
         form["api_type"] = "json";
         var failures = new List<string>();
+        var harmful = RepeatsAreHarmful(path);
+        // Set when a route got far enough that Reddit may have acted (a server error, or the
+        // connection dropping after the request went out).
+        var maybeDone = false;
 
         async Task<string?> ViaModhash()
         {
-            if (_modhash == null) await RefreshIdentityAsync();
+            try
+            {
+                if (_modhash == null) await RefreshIdentityAsync();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not RedditAuthException)
+            {
+                failures.Add($"cookie route: {ex.Message}");
+                return null;
+            }
             if (_modhash == null)
             {
                 failures.Add("cookie route: no modhash from /api/me.json");
@@ -805,9 +851,23 @@ public sealed partial class RedditApi(RedditSession session)
                 return null;
             }
             var withModhash = new Dictionary<string, string>(form) { ["uh"] = _modhash };
-            var (status, body) = await session.SendAsync("POST", Base + path + RawJson, withModhash, _modhash, default);
+            int status;
+            string body;
+            try
+            {
+                (status, body) = await session.SendAsync("POST", Base + path + RawJson, withModhash, _modhash, default);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The page navigated or the fetch failed: the other route can still be tried.
+                failures.Add($"cookie route: {ex.Message}");
+                ApiLog.Write($"POST {path} cookie route failed: {ex.Message}");
+                maybeDone = true;
+                return null;
+            }
             ApiLog.Write($"POST {path} cookie route -> HTTP {status}: {ApiLog.Clip(body)}");
             if (status is >= 200 and < 300 && LooksLikeJson(body)) return body;
+            if (status >= 500) maybeDone = true;
             failures.Add($"cookie route: HTTP {status}");
             return null;
         }
@@ -826,43 +886,47 @@ public sealed partial class RedditApi(RedditSession session)
                 Content = new FormUrlEncodedContent(form),
             };
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            string body;
-            HttpResponseMessage res;
             try
             {
-                res = await Http.SendAsync(req);
-                body = await res.Content.ReadAsStringAsync();
+                using var res = await Http.SendAsync(req);
+                var body = await res.Content.ReadAsStringAsync();
+                ApiLog.Write($"POST {path} oauth route -> HTTP {(int)res.StatusCode}: {ApiLog.Clip(body)}");
+                if (res.IsSuccessStatusCode && LooksLikeJson(body)) return body;
+                if ((int)res.StatusCode >= 500) maybeDone = true;
+                failures.Add($"oauth route: HTTP {(int)res.StatusCode}");
+                return null;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
                 // A network failure here mustn't stop the other route from being tried.
                 failures.Add($"oauth route: {ex.Message}");
                 ApiLog.Write($"POST {path} oauth route failed: {ex.Message}");
+                maybeDone = true;
                 return null;
             }
-            using var _ = res;
-            ApiLog.Write($"POST {path} oauth route -> HTTP {(int)res.StatusCode}: {ApiLog.Clip(body)}");
-            if (res.IsSuccessStatusCode && LooksLikeJson(body)) return body;
-            failures.Add($"oauth route: HTTP {(int)res.StatusCode}");
-            return null;
+        }
+
+        // One route, then the other, unless the first may have done it already.
+        async Task<string?> Attempt()
+        {
+            var result = await (oauthFirst ? ViaOAuth() : ViaModhash());
+            if (result != null || harmful && maybeDone) return result;
+            return await (oauthFirst ? ViaModhash() : ViaOAuth());
         }
 
         await session.RateLimit.WaitAsync(default);
-        var result = oauthFirst
-            ? await ViaOAuth() ?? await ViaModhash()
-            : await ViaModhash() ?? await ViaOAuth();
-        if (result == null && failures.Any(f => f.EndsWith("HTTP 429")))
+        var result = await Attempt();
+        if (result == null && !(harmful && maybeDone) && failures.Any(f => f.EndsWith("HTTP 429")))
         {
-            // Too many requests just now: wait a moment and try once more, rather than lose a vote or reply.
+            // Too many requests just now (Reddit didn't act on it): wait a moment and try once more,
+            // rather than lose a vote or reply.
             var wait = session.RateLimit.Delay();
             await Task.Delay(wait > TimeSpan.FromSeconds(3) ? wait : TimeSpan.FromSeconds(3));
             failures.Clear();
-            result = oauthFirst
-                ? await ViaOAuth() ?? await ViaModhash()
-                : await ViaModhash() ?? await ViaOAuth();
+            result = await Attempt();
         }
         if (result != null) return Checked(result);
-
+        if (harmful && maybeDone) throw new InvalidOperationException(MaybeSentMessage);
         throw new InvalidOperationException($"Reddit refused the request ({string.Join("; ", failures)}).");
     }
 
@@ -884,8 +948,9 @@ public sealed partial class RedditApi(RedditSession session)
                 if (res.IsSuccessStatusCode && LooksLikeJson(body)) return body;
                 ApiLog.Write($"GET {pathAndQuery} oauth route -> HTTP {(int)res.StatusCode}: {ApiLog.Clip(body)}");
             }
-            catch (HttpRequestException ex)
+            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException && !ct.IsCancellationRequested)
             {
+                // Unreachable or too slow: the cookie route below still gets a go.
                 ApiLog.Write($"GET {pathAndQuery} oauth route failed: {ex.Message}");
             }
         }

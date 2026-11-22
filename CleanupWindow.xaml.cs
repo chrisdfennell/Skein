@@ -141,6 +141,11 @@ public partial class CleanupWindow : Window
                 ? $"Stopped after {done:N0} of {total:N0} · {_candidates.Count} suggested"
                 : $"Checked all {total:N0} · {_candidates.Count} suggested";
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Reddit blocking requests, say: stop rather than guess what each community is like.
+            Progress.Text = $"Stopped after {done:N0} of {total:N0}: {ex.Message}";
+        }
         finally
         {
             _scan = null;

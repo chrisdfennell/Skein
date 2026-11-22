@@ -4,56 +4,12 @@
         Title="Preferences" Width="980" Height="700" MinWidth="760" MinHeight="480"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
     <Window.Resources>
-        <!-- One setting: a softly shaded card. -->
-        <Style x:Key="Card" TargetType="Border">
-            <Setter Property="Background" Value="#10808080" />
-            <Setter Property="BorderBrush" Value="#18808080" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="16,12" />
-            <Setter Property="Margin" Value="0,0,0,6" />
-        </Style>
-        <Style x:Key="Title" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="14" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style x:Key="Help" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Opacity" Value="0.7" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Margin" Value="0,2,0,0" />
-        </Style>
-        <!-- Help text under a checkbox lines up with the checkbox's label. -->
-        <Style x:Key="CheckHelp" TargetType="TextBlock" BasedOn="{StaticResource Help}">
-            <Setter Property="Margin" Value="28,2,0,0" />
-        </Style>
-        <Style x:Key="Group" TargetType="TextBlock">
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Margin" Value="2,18,0,8" />
-        </Style>
-        <Style x:Key="PageTitle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="26" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,0,0,4" />
-        </Style>
-        <Style x:Key="PageIntro" TargetType="TextBlock">
-            <Setter Property="Opacity" Value="0.7" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Margin" Value="0,0,0,10" />
-        </Style>
         <Style x:Key="Page" TargetType="ScrollViewer">
             <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
             <Setter Property="Visibility" Value="Collapsed" />
             <Setter Property="Padding" Value="28,20,28,20" />
         </Style>
-        <Style x:Key="Status" TargetType="TextBlock">
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Opacity" Value="0.8" />
-            <Setter Property="Margin" Value="0,8,0,0" />
-        </Style>
-        <Style x:Key="ListBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Style x:Key="ListInput" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
             <Setter Property="AcceptsReturn" Value="True" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
@@ -261,21 +217,21 @@
                         <StackPanel>
                             <TextBlock Text="With these words in the title" Style="{StaticResource Title}" />
                             <TextBlock Text="One per line." Style="{StaticResource Help}" />
-                            <TextBox x:Name="Keywords" Style="{StaticResource ListBox}" AutomationProperties.Name="Hide posts with these words in the title" />
+                            <TextBox x:Name="Keywords" Style="{StaticResource ListInput}" AutomationProperties.Name="Hide posts with these words in the title" />
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="Linking to these sites" Style="{StaticResource Title}" />
                             <TextBlock Text="One per line, like example.com." Style="{StaticResource Help}" />
-                            <TextBox x:Name="Domains" Style="{StaticResource ListBox}" AutomationProperties.Name="Hide posts linking to these sites" />
+                            <TextBox x:Name="Domains" Style="{StaticResource ListInput}" AutomationProperties.Name="Hide posts linking to these sites" />
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="From these communities" Style="{StaticResource Title}" />
                             <TextBlock Text="One per line, without r/." Style="{StaticResource Help}" />
-                            <TextBox x:Name="Subreddits" Style="{StaticResource ListBox}" AutomationProperties.Name="Hide posts from these communities" />
+                            <TextBox x:Name="Subreddits" Style="{StaticResource ListInput}" AutomationProperties.Name="Hide posts from these communities" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -291,14 +247,14 @@
                         <StackPanel>
                             <TextBlock Text="Muted" Style="{StaticResource Title}" />
                             <TextBlock Text="Their posts are hidden and their comments collapsed." Style="{StaticResource Help}" />
-                            <TextBox x:Name="MutedUsers" Style="{StaticResource ListBox}" Height="130" AutomationProperties.Name="Muted users" />
+                            <TextBox x:Name="MutedUsers" Style="{StaticResource ListInput}" Height="130" AutomationProperties.Name="Muted users" />
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="Highlighted" Style="{StaticResource Title}" />
                             <TextBlock Text="Their posts are tagged and their comments stand out." Style="{StaticResource Help}" />
-                            <TextBox x:Name="HighlightedUsers" Style="{StaticResource ListBox}" Height="130" AutomationProperties.Name="Highlighted users" />
+                            <TextBox x:Name="HighlightedUsers" Style="{StaticResource ListInput}" Height="130" AutomationProperties.Name="Highlighted users" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -465,6 +421,15 @@
                             </DockPanel>
                         </StackPanel>
                     </Border>
+                    <Border Style="{StaticResource Card}">
+                        <DockPanel>
+                            <Button x:Name="ClearCache" DockPanel.Dock="Right" Content="Clear" VerticalAlignment="Center" Click="OnClearCache" />
+                            <StackPanel Margin="0,0,16,0">
+                                <TextBlock Text="Picture cache" Style="{StaticResource Title}" />
+                                <TextBlock x:Name="CacheSize" Style="{StaticResource Help}" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
 
@@ -538,6 +503,15 @@
                     <TextBlock Text="Press ? anywhere in Skein for every keyboard shortcut." Style="{StaticResource PageIntro}" />
                     <Border Style="{StaticResource Card}">
                         <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="Show the tour" VerticalAlignment="Center" Click="OnShowWelcome" />
+                            <StackPanel Margin="0,0,16,0">
+                                <TextBlock Text="Welcome tour" Style="{StaticResource Title}" />
+                                <TextBlock Text="The one-minute introduction to Skein's keyboard, sidebar and reading features." Style="{StaticResource Help}" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <DockPanel>
                             <Button DockPanel.Dock="Right" Content="🐞 Report a problem…" VerticalAlignment="Center" Click="OnReportProblem" />
                             <StackPanel Margin="0,0,16,0">
                                 <TextBlock Text="Something not working?" Style="{StaticResource Title}" />
@@ -559,7 +533,7 @@
         </Grid>
 
         <!-- Save / Cancel -->
-        <Border Grid.Row="1" Grid.Column="1" BorderBrush="#20808080" BorderThickness="0,1,0,0" Padding="28,12">
+        <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource ButtonBar}" Padding="28,12">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Content="Save" MinWidth="96" IsDefault="True" Click="OnSave" Style="{DynamicResource AccentButtonStyle}" />

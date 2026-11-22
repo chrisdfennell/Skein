@@ -488,7 +488,17 @@ public partial class SubmitWindow : Window
     void OnEditMedia(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: SubmitMedia media }) return;
-        var editor = new ImageEditWindow(media.Path) { Owner = this };
+        ImageEditWindow editor;
+        try
+        {
+            editor = new ImageEditWindow(media.Path) { Owner = this };
+        }
+        catch (Exception ex)
+        {
+            // Moved or deleted since (a draft from earlier), or a picture Windows can't read.
+            ErrorText.Text = File.Exists(media.Path) ? $"Couldn't open {media.Name} for editing: {ex.Message}" : $"{media.Name} isn't there any more.";
+            return;
+        }
         if (editor.ShowDialog() != true || editor.SavedPath is not { } edited) return;
         var index = _media.IndexOf(media);
         if (index >= 0) _media[index] = new SubmitMedia(edited, media.Caption);

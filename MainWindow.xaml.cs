@@ -32,6 +32,7 @@ public partial class MainWindow : Window
         _vm = new MainViewModel(services, detail, new InAppBrowser(BrowserWebView));
         DataContext = _vm;
         _vm.ReminderNotification += OnReminderNotification;
+        PreviewTextInput += OnPreviewTextInput;
         Toasts.Activated += OnToastActivated;
         Toasts.Start();
         // Out of sight (minimized, or hidden in the tray): use less memory.
@@ -55,7 +56,11 @@ public partial class MainWindow : Window
         _vm.PaletteRequested += ShowPalette;
         _vm.FullscreenRequested += SetFullscreen;
         _vm.MiniModeRequested += SetMiniMode;
-        Loaded += (_, _) => { if (Program.StartupUrl is { } url) _vm.OpenWhenReady(url); };
+        Loaded += (_, _) =>
+        {
+            if (Program.StartupUrl is { } url) _vm.OpenWhenReady(url);
+            foreach (var link in Program.TakePendingLinks()) _vm.OpenWhenReady(link);
+        };
         // Offer a reddit link you copied elsewhere when you come back to Skein.
         Activated += (_, _) =>
         {
@@ -277,7 +282,11 @@ public partial class MainWindow : Window
             });
     }
 
-    async void OnToastActivated(Microsoft.Toolkit.Uwp.Notifications.ToastArguments args, IReadOnlyDictionary<string, object> input)
+    // A notification clicked while Skein was closed starts it; act once it's signed in.
+    void OnToastActivated(Microsoft.Toolkit.Uwp.Notifications.ToastArguments args, IReadOnlyDictionary<string, object> input) =>
+        _vm.WhenReady(() => HandleToast(args, input));
+
+    async void HandleToast(Microsoft.Toolkit.Uwp.Notifications.ToastArguments args, IReadOnlyDictionary<string, object> input)
     {
         string Arg(string key) => args.TryGetValue(key, out string value) ? value : "";
         var item = _notifiedItems.GetValueOrDefault(Arg("id"));
@@ -488,6 +497,8 @@ public partial class MainWindow : Window
         {
             WindowStyle = _styleBeforeFullscreen;
             ResizeMode = _resizeBeforeFullscreen;
+            // Via Normal again: re-maximizing a window that's already maximized leaves it covering the taskbar.
+            WindowState = WindowState.Normal;
             WindowState = _stateBeforeFullscreen;
             RootGrid.RowDefinitions[0].Height = RootGrid.RowDefinitions[2].Height = GridLength.Auto;
             if (!_readingBeforeFullscreen) _vm.IsReadingMode = false;
@@ -641,28 +652,36 @@ public partial class MainWindow : Window
         if (key == Key.Escape && (SearchBox.IsKeyboardFocusWithin || SuggestionList.IsKeyboardFocusWithin) && _vm.ShowSuggestions)
             return;
 
-        var name = KeyName(key, shift);
+        // Single characters (j, k, ?, /) are handled as typed text, below, so they follow the
+        // keyboard layout and any character can be a shortcut. Here: Ctrl combinations and
+        // the keys that aren't characters.
+        var name = KeyName(key, ctrl);
         if (name != null && _vm.HandleKey(name, ctrl, shift)) e.Handled = true;
     }
 
-    /// <summary>Maps WPF keys to KeyboardEvent.key-style names, matching what the web view forwards.</summary>
-    static string? KeyName(Key key, bool shift) => key switch
+    /// <summary>Ctrl+letter and the non-character keys, named as the web's KeyboardEvent.key names them.</summary>
+    static string? KeyName(Key key, bool ctrl) => key switch
     {
-        >= Key.A and <= Key.Z => shift ? key.ToString() : key.ToString().ToLowerInvariant(),
-        >= Key.D0 and <= Key.D9 when !shift => ((int)(key - Key.D0)).ToString(),
-        Key.Space => " ",
+        >= Key.A and <= Key.Z when ctrl => key.ToString().ToLowerInvariant(),
         Key.Tab => "Tab",
         Key.F5 => "F5",
         Key.F11 => "F11",
         Key.Escape => "Escape",
-        Key.OemPlus => shift ? "+" : "=",
-        Key.Add => "+",
-        Key.OemMinus or Key.Subtract => "-",
-        Key.OemQuestion => shift ? "?" : "/",
-        Key.Divide => "/",
         _ => null,
     };
 
+    /// <summary>Single-key shortcuts: the character typed, as the keyboard layout produced it.</summary>
+    void OnPreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (e.Text.Length != 1 || Keyboard.Modifiers.HasFlag(ModifierKeys.Control) || Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) return;
+        if (DetailWebView.IsKeyboardFocusWithin || BrowserWebView.IsKeyboardFocusWithin || LoginWebView.IsKeyboardFocusWithin) return;
+        if (Keyboard.FocusedElement is TextBoxBase or PasswordBox || Keyboard.FocusedElement is ComboBox { IsDropDownOpen: true } ||
+            SuggestionList.IsKeyboardFocusWithin)
+            return;
+        // Space presses the button or opens the box that has focus, as everywhere in Windows.
+        if (e.Text == " " && Keyboard.FocusedElement is ButtonBase or ComboBox) return;
+        if (_vm.HandleKey(e.Text, ctrl: false, shift: Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))) e.Handled = true;
+    }
     // ---- Taskbar flash for new inbox items -----------------------------------------------------
 
     [StructLayout(LayoutKind.Sequential)]

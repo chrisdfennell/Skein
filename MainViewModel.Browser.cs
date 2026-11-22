@@ -49,6 +49,16 @@ public sealed partial class MainViewModel
 
     // ---- Links ------------------------------------------------------------------------------
 
+    /// <summary>
+    /// A link clicked in a post or comment: like <see cref="OpenUrl"/>, but never one of Skein's own
+    /// commands (those are for the jump list, the bookmark and Send to, not for things people post).
+    /// </summary>
+    public void OpenUrlFromPage(string url)
+    {
+        if (url.StartsWith(AppCommands.FilesPrefix, StringComparison.Ordinal) || AppCommands.Parse(url) != null) return;
+        OpenUrl(url);
+    }
+
     /// <summary>Opens Reddit links inside Skein and everything else in the default browser.</summary>
     public void OpenUrl(string url)
     {

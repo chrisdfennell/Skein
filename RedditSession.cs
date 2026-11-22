@@ -155,17 +155,25 @@ public sealed class RedditSession(WebView2 webView, string profile)
         {
             if (!OnRedditOrigin) return null;
             var (status, body) = await SendAsync("GET", "https://www.reddit.com/api/me.json", null, null, default, park: false);
-            if (status != 200) return null;
-            using var doc = JsonDocument.Parse(body);
-            var name = doc.RootElement.TryGetProperty("data", out var data) ? data.Str("name") : "";
-            return name.Length > 0 ? name : null;
+            Blocked = RedditApi.IsBlockPage(body);
+            if (status == 200 && body.TrimStart().StartsWith('{'))
+            {
+                using var doc = JsonDocument.Parse(body);
+                var name = doc.RootElement.TryGetProperty("data", out var data) ? data.Str("name") : "";
+                if (name.Length > 0) return name;
+            }
+            ApiLog.Write($"sign-in check: /api/me.json -> HTTP {status}: {ApiLog.Clip(body)}");
+            return null;
         }
-        catch
+        catch (Exception ex)
         {
+            ApiLog.Write($"sign-in check failed: {ex.Message}");
             return null;
         }
     }
 
+    /// <summary>Reddit answered the last sign-in check with its "blocked by network security" page.</summary>
+    public bool Blocked { get; private set; }
     public async Task<string?> GetCookieAsync(string name)
     {
         var cookies = await Core.CookieManager.GetCookiesAsync("https://www.reddit.com");
@@ -196,8 +204,18 @@ public sealed class RedditSession(WebView2 webView, string profile)
             " retryAfter: r.headers.get('retry-after') }); })()";
         var args = JsonSerializer.Serialize(new { expression, awaitPromise = true, returnByValue = true });
 
-        // DevTools' Runtime.evaluate can await the promise, which ExecuteScriptAsync can't.
-        var raw = await Core.CallDevToolsProtocolMethodAsync("Runtime.evaluate", args);
+        // DevTools' Runtime.evaluate can await the promise, which ExecuteScriptAsync can't. A fetch
+        // that stalls (the network dropping mid-answer) would otherwise leave the caller waiting
+        // forever, so give up after a minute; cancelling stops the wait straight away.
+        string raw;
+        try
+        {
+            raw = await Core.CallDevToolsProtocolMethodAsync("Runtime.evaluate", args).WaitAsync(RequestTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            throw new InvalidOperationException("Reddit didn't answer in time. Check your connection and try again.");
+        }
         ct.ThrowIfCancellationRequested();
 
         using var doc = JsonDocument.Parse(raw);
@@ -213,6 +231,8 @@ public sealed class RedditSession(WebView2 webView, string profile)
         RateLimit.Observe(r.Str("remaining"), r.Str("reset"), r.Str("retryAfter"), (int)r.Long("status"));
         return ((int)r.Long("status"), r.Str("body"));
     }
+
+    static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>What Reddit says about how many more requests it will take right now.</summary>
     public RateLimiter RateLimit { get; } = new();

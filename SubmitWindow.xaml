@@ -8,7 +8,23 @@
     <Window.Resources>
         <local:VisibilityConverter x:Key="VisConverter" />
     </Window.Resources>
-    <DockPanel Margin="20">
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Style="{StaticResource ButtonBar}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="LaterButton" Content="🕒 Post later…" MinWidth="96" Margin="0,0,8,0" Click="OnPostLater"
+                            ToolTip="Pick a time and Skein posts it then (text and link posts, while Skein is running)" />
+                    <Button x:Name="PostButton" Content="Post" MinWidth="96" Click="OnPost"
+                            Style="{DynamicResource AccentButtonStyle}" />
+                    <Button Content="Cancel" MinWidth="96" Margin="8,0,0,0" IsCancel="True" />
+                </StackPanel>
+                <TextBlock x:Name="ErrorText" Foreground="#E5484D" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+    <DockPanel Margin="24,18,24,14">
+        <TextBlock DockPanel.Dock="Top" Text="✏ New post" Style="{StaticResource DialogTitle}" Margin="0,0,0,10" />
+
         <!-- A draft from last time, put back. -->
         <Border x:Name="DraftBar" DockPanel.Dock="Top" Visibility="Collapsed" Padding="10,6" Margin="0,0,0,12"
                 CornerRadius="6" Background="#22808080">
@@ -18,20 +34,9 @@
             </DockPanel>
         </Border>
 
-        <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button x:Name="LaterButton" Content="🕒 Post later…" MinWidth="90" Margin="0,0,8,0" Click="OnPostLater"
-                        ToolTip="Pick a time and Skein posts it then (text and link posts, while Skein is running)" />
-                <Button x:Name="PostButton" Content="Post" MinWidth="90" Click="OnPost"
-                        Style="{DynamicResource AccentButtonStyle}" />
-                <Button Content="Cancel" MinWidth="90" Margin="8,0,0,0" IsCancel="True" />
-            </StackPanel>
-            <TextBlock x:Name="ErrorText" Foreground="#E5484D" TextWrapping="Wrap" VerticalAlignment="Center" />
-        </DockPanel>
-
         <!-- The community's rules, once it's known. -->
-        <Border x:Name="RulesPanel" DockPanel.Dock="Right" Width="250" Margin="16,0,0,0" Padding="12,10" CornerRadius="8"
-                Background="#14808080" Visibility="Collapsed">
+        <Border x:Name="RulesPanel" DockPanel.Dock="Right" Width="260" Margin="16,0,0,0" Style="{StaticResource Card}" Padding="12,10"
+                Visibility="Collapsed">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" x:Name="RulesHeading" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6" />
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -53,7 +58,7 @@
         </Border>
 
         <StackPanel DockPanel.Dock="Top">
-            <TextBlock Text="Community" Margin="0,0,0,4" />
+            <TextBlock Text="Community" Style="{StaticResource Title}" Margin="0,0,0,4" />
             <DockPanel>
                 <TextBlock Text="r/" VerticalAlignment="Center" FontWeight="Bold" Foreground="#FF4500" Margin="0,0,6,0" />
                 <TextBox x:Name="Subreddit" TextChanged="OnSubredditChanged" />
@@ -68,18 +73,18 @@
             </DockPanel>
             <TextBlock x:Name="CommunityNote" Margin="0,4,0,0" FontSize="12" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
 
-            <TextBlock Text="Title" Margin="0,12,0,4" />
+            <TextBlock Text="Title" Style="{StaticResource Title}" Margin="0,12,0,4" />
             <TextBox x:Name="PostTitle" MaxLength="300" SpellCheck.IsEnabled="True" TextChanged="OnChanged" />
 
-            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <WrapPanel Margin="0,12,0,0">
                 <RadioButton x:Name="TextKind" Content="Text post" IsChecked="True" Checked="OnKindChanged" />
                 <RadioButton x:Name="LinkKind" Content="Link" Margin="16,0,0,0" Checked="OnKindChanged" />
                 <RadioButton x:Name="MediaKind" Content="Images &amp; video" Margin="16,0,0,0" Checked="OnKindChanged" />
                 <CheckBox x:Name="Nsfw" Content="NSFW" Margin="24,0,0,0" Click="OnChanged" />
                 <CheckBox x:Name="Spoiler" Content="Spoiler" Margin="12,0,0,0" Click="OnChanged" />
-            </StackPanel>
+            </WrapPanel>
 
-            <TextBlock x:Name="ContentLabel" Text="Text" Margin="0,12,0,4" />
+            <TextBlock x:Name="ContentLabel" Text="Text" Style="{StaticResource Title}" Margin="0,12,0,4" />
         </StackPanel>
 
         <Grid>
@@ -127,5 +132,6 @@
                 </ListBox>
             </DockPanel>
         </Grid>
+    </DockPanel>
     </DockPanel>
 </Window>

@@ -165,14 +165,16 @@ public sealed partial class RedditApi
         return null;
     }
 
-    /// <summary>Your newest post with this title (when Reddit didn't say where it went).</summary>
+    /// <summary>Your newest post with this title from the last few minutes (when Reddit didn't say where it went).</summary>
     async Task<string?> FindMyNewestPostAsync(string title, CancellationToken ct)
     {
         if (UserName == null) return null;
         try
         {
             var (items, _) = await GetListingAsync($"/user/{UserName}/submitted.json?sort=new", null, ct);
-            return items.FirstOrDefault(p => p.Kind == ItemKind.Link && p.Title == title)?.PermalinkUrl;
+            // Recent only: an older post of yours with the same title isn't the one just made.
+            var since = DateTimeOffset.UtcNow.AddMinutes(-15);
+            return items.FirstOrDefault(p => p.Kind == ItemKind.Link && p.Title == title && p.Created > since)?.PermalinkUrl;
         }
         catch
         {
@@ -180,18 +182,41 @@ public sealed partial class RedditApi
         }
     }
 
-    /// <summary>A POST with a JSON body (gallery posts), by the same two routes as form posts.</summary>
+    /// <summary>
+    /// A POST with a JSON body (gallery posts, removal reasons), by the same two routes as form
+    /// posts, and with the same care not to send a post or message twice.
+    /// </summary>
     async Task<JsonDocument> PostJsonAsync(string path, string json)
     {
         var failures = new List<string>();
-        if (_modhash == null) await RefreshIdentityAsync();
+        var harmful = RepeatsAreHarmful(path);
+        var maybeDone = false;
+        await session.RateLimit.WaitAsync(default);
+        try
+        {
+            if (_modhash == null) await RefreshIdentityAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not RedditAuthException)
+        {
+            failures.Add($"cookie route: {ex.Message}");
+        }
         if (_modhash != null)
         {
-            var (status, body) = await session.SendAsync("POST", Base + path + RawJson, null, _modhash, default, json: json);
-            ApiLog.Write($"POST {path} (json) cookie route -> HTTP {status}: {ApiLog.Clip(body)}");
-            if (status is >= 200 and < 300 && (LooksLikeJson(body) || body.Trim().Length == 0)) return Checked(OrEmpty(body));
-            failures.Add($"cookie route: HTTP {status}");
+            try
+            {
+                var (status, body) = await session.SendAsync("POST", Base + path + RawJson, null, _modhash, default, json: json);
+                ApiLog.Write($"POST {path} (json) cookie route -> HTTP {status}: {ApiLog.Clip(body)}");
+                if (status is >= 200 and < 300 && (LooksLikeJson(body) || body.Trim().Length == 0)) return Checked(OrEmpty(body));
+                if (status >= 500) maybeDone = true;
+                failures.Add($"cookie route: HTTP {status}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures.Add($"cookie route: {ex.Message}");
+                maybeDone = true;
+            }
         }
+        if (harmful && maybeDone) throw new InvalidOperationException(MaybeSentMessage);
 
         if (await session.GetCookieAsync("token_v2") is { } token)
         {
@@ -200,15 +225,22 @@ public sealed partial class RedditApi
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            using var response = await Http.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-            ApiLog.Write($"POST {path} (json) oauth route -> HTTP {(int)response.StatusCode}: {ApiLog.Clip(body)}");
-            if (response.IsSuccessStatusCode && (LooksLikeJson(body) || body.Trim().Length == 0)) return Checked(OrEmpty(body));
-            failures.Add($"oauth route: HTTP {(int)response.StatusCode}");
+            try
+            {
+                using var response = await Http.SendAsync(request);
+                var body = await response.Content.ReadAsStringAsync();
+                ApiLog.Write($"POST {path} (json) oauth route -> HTTP {(int)response.StatusCode}: {ApiLog.Clip(body)}");
+                if (response.IsSuccessStatusCode && (LooksLikeJson(body) || body.Trim().Length == 0)) return Checked(OrEmpty(body));
+                failures.Add($"oauth route: HTTP {(int)response.StatusCode}");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                failures.Add($"oauth route: {ex.Message}");
+                if (harmful) throw new InvalidOperationException(MaybeSentMessage);
+            }
         }
         throw new InvalidOperationException($"Reddit refused the request ({string.Join("; ", failures)}).");
     }
-
     /// <summary>Some newer endpoints answer success with an empty body.</summary>
     static string OrEmpty(string body) => body.Trim().Length == 0 ? "{}" : body;
 }

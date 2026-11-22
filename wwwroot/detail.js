@@ -799,12 +799,14 @@ try {
 }
 
 /** Saves the textarea as a draft while typing (shortly after each pause). */
+/** Saves the text as a draft shortly after each change. Returns a function that stops a pending save. */
 function keepDraft(textarea, key, original = '') {
     let timer;
     textarea.addEventListener('input', () => {
         clearTimeout(timer);
         timer = setTimeout(() => saveDraft(key, textarea.value, original), 400);
     });
+    return () => clearTimeout(timer);
 }
 
 // ---- Replies ---------------------------------------------------------------------------
@@ -876,11 +878,12 @@ function openEditor(target, initial, save, render, thingName) {
     const saveButton = el('button', { class: 'primary' }, 'Save edit');
     const cancel = el('button', null, 'Cancel');
     const editor = el('div', { class: 'reply-box' }, input, el('div', { class: 'reply-actions' }, saveButton, cancel, status), preview);
-    keepDraft(textarea, draftKey, initial);
+    const stopDraft = keepDraft(textarea, draftKey, initial);
     target.replaceWith(editor);
     input.focusInput();
 
     cancel.onclick = () => {
+        stopDraft(); // a save still pending would bring the cancelled edit back
         clearDraft(draftKey);
         editor.replaceWith(target);
     };
@@ -889,6 +892,7 @@ function openEditor(target, initial, save, render, thingName) {
         status.textContent = 'Saving…';
         try {
             const data = await save(textarea.value);
+            stopDraft();
             clearDraft(draftKey);
             editor.replaceWith(render(data));
             showToast('Edit saved');
@@ -1165,6 +1169,8 @@ function clearView() {
     state.newIndex = state.opIndex = -1;
     state.post = null;
     state.page = null;
+    // Each view gets a number, so a slow answer for a view you've left isn't painted over the new one.
+    state.view = (state.view || 0) + 1;
     closePanel();
     root.replaceChildren();
     empty.hidden = false;
@@ -1374,7 +1380,7 @@ function renderThread(m) {
 
     // Game, match and live threads keep themselves up to date.
     if (live.post && live.post.name !== post.name) stopLive();
-    if (!live.timer && !m.focus && !m.offline && LIVE_TITLES.test(post.title + ' ' + (post.link_flair_text || '')) &&
+    if (!live.timer && live.stoppedFor !== post.name && !m.focus && !m.offline && LIVE_TITLES.test(post.title + ' ' + (post.link_flair_text || '')) &&
         Date.now() / 1000 - post.created_utc < 86400) startLive(post);
     paintLive();
 
@@ -1399,7 +1405,7 @@ function renderChildren(children, container, depth, post) {
 
 function commentNode(c, depth, post) {
     const node = el('div', {
-        class: 'comment', id: 'c_' + c.id, 'data-depth': depth, 'data-name': c.name, 'data-author': c.author,
+        class: 'comment', id: 'c_' + c.id, 'data-depth': depth, 'data-name': c.name, 'data-author': c.author, 'data-created': c.created_utc || 0,
     });
     const muted = isMuted(c.author);
     const isNew = !!state.lastVisit && c.created_utc > state.lastVisit && !sameUser(c.author, state.settings.me);
@@ -1519,7 +1525,7 @@ function openUserMenu(anchor, name) {
         !sameUser(name, state.settings.me) &&
             el('button', { onclick: () => setFollowing(name, !isFollowing(name)) },
                 isFollowing(name) ? `Stop following u/${name}` : `👁 Follow u/${name}'s posts`),
-        el('button', { onclick: () => openNoteForm(menu, name) },
+        el('button', { onclick: e => { e.stopPropagation(); openNoteForm(menu, name); } },
             noteFor(name) ? `📝 Edit your note on u/${name}…` : `📝 Note or tag on u/${name}…`));
     document.body.append(menu);
     const r = anchor.getBoundingClientRect();
@@ -1639,7 +1645,7 @@ function openModMenu(anchor, thing, kind, badges, depth) {
     const menu = el('div', { id: 'menu' },
         item('✓ Approve', 'approve'),
         item('✖ Remove', 'remove'),
-        el('button', { onclick: () => openRemoveReasonForm(menu, thing, kind, sub, badges) }, '✖ Remove with a reason…'),
+        el('button', { onclick: e => { e.stopPropagation(); openRemoveReasonForm(menu, thing, kind, sub, badges); } }, '✖ Remove with a reason…'),
         item('🚫 Remove as spam', 'spam'),
         item(thing.locked ? '🔓 Unlock' : '🔒 Lock', thing.locked ? 'unlock' : 'lock'),
         kind === 't3' && item(thing.stickied ? '📌 Unpin' : '📌 Pin to top', thing.stickied ? 'unsticky' : 'sticky'),
@@ -1651,7 +1657,7 @@ function openModMenu(anchor, thing, kind, badges, depth) {
         thing.author && thing.author !== '[deleted]' && !mine &&
             el('button', { onclick: () => { closeMenu(); showUserHistory(thing.author, sub); } }, `🔎 u/${thing.author}'s history here…`),
         thing.author && thing.author !== '[deleted]' && !mine &&
-            el('button', { onclick: () => openBanForm(menu, thing.author, sub) }, `⛔ Ban u/${thing.author}…`));
+            el('button', { onclick: e => { e.stopPropagation(); openBanForm(menu, thing.author, sub); } }, `⛔ Ban u/${thing.author}…`));
     document.body.append(menu);
     positionMenu(menu, anchor);
 }
@@ -1857,12 +1863,16 @@ function showFindCurrent() {
 /** Expands every "load more replies" (not separate deep threads) so search sees everything. */
 async function loadAllComments() {
     findLoadAll.disabled = true;
+    const post = state.post;
     try {
-        for (let round = 1; round <= 15; round++) {
+        for (let round = 1; round <= 15 && state.post === post; round++) {
             const buttons = [...root.querySelectorAll('.more button[data-more]')].filter(b => !b.disabled);
             if (!buttons.length) break;
             findLoadAll.textContent = `Loading… (${round})`;
-            for (const button of buttons) await button.loadMore();
+            for (const button of buttons) {
+                if (state.post !== post) break; // you moved on to another post
+                await button.loadMore();
+            }
         }
     } finally {
         findLoadAll.textContent = 'Load all';
@@ -1921,6 +1931,8 @@ function moreNode(m, depth, post) {
             const fragment = document.createDocumentFragment();
             const created = new Map();
             for (const thing of things) {
+                // Already on the page (it arrived live): don't add it a second time.
+                if (thing.kind === 't1' && document.getElementById('c_' + thing.data.id)) continue;
                 const parentName = thing.data.parent_id;
                 const parent = created.get(parentName) || root.querySelector(`.comment[data-name="${parentName}"]`);
                 const isSibling = parentName === m.parent_id;
@@ -2295,18 +2307,33 @@ async function popOutVideo(video) {
 // so the thread doesn't jump about while you read. Game, match and live threads start live.
 
 const LIVE_SECONDS = 20;
-const live = { post: null, timer: null, pending: [] };
-const LIVE_TITLES = /\b(live|game thread|match thread|megathread|race thread|discussion thread|post.?game)\b/i;
+// since: only comments posted after this (unix seconds) count as new, so older ones hidden behind
+// "load more" aren't offered. seen: ids already offered or shown, never offered twice.
+// stoppedFor: a post you switched live off for, so a refresh or re-sort doesn't turn it back on.
+const live = { post: null, timer: null, pending: [], since: 0, seen: new Set(), stoppedFor: null };
+const LIVE_TITLES = /\b(live thread|live updates?|game thread|match thread|megathread|race thread|discussion thread|post.?game thread)\b/i;
 
 function liveButton(d) {
     const button = el('button', { class: 'action live-button', title: 'Show new comments as they\'re posted' }, '● Live');
-    button.onclick = () => (live.timer ? stopLive() : startLive(d));
+    button.onclick = () => {
+        if (live.timer) {
+            stopLive();
+            live.stoppedFor = d.name;
+        } else {
+            live.stoppedFor = null;
+            startLive(d);
+        }
+    };
     return button;
 }
 
 function startLive(d) {
     stopLive();
     live.post = d;
+    // Counting from the newest comment already on the page (or now, if there are none).
+    const times = [...root.querySelectorAll('.comment')].map(n => Number(n.dataset.created) || 0);
+    live.since = times.length ? Math.max(...times) : Date.now() / 1000 - 60;
+    live.seen = new Set();
     live.timer = setInterval(pollLive, LIVE_SECONDS * 1000);
     paintLive();
 }
@@ -2332,13 +2359,13 @@ function paintLive() {
 }
 
 /** The comments a listing has that the page doesn't show yet, parents before their replies. */
-function unseenComments(listing, known) {
+function unseenComments(listing, known, since = 0) {
     const found = [];
     const walk = children => {
         for (const child of children || []) {
             if (child.kind !== 't1') continue;
             const c = child.data;
-            if (!known(c.id)) found.push(c);
+            if (!known(c.id) && (c.created_utc || 0) > since) found.push(c);
             if (c.replies && c.replies.data) walk(c.replies.data.children);
         }
     };
@@ -2359,8 +2386,9 @@ async function pollLive() {
         stopLive();
         return;
     }
-    const fresh = unseenComments(raw[1], id => !!document.getElementById('c_' + id) || live.pending.some(p => p.id === id));
+    const fresh = unseenComments(raw[1], id => live.seen.has(id) || !!document.getElementById('c_' + id), live.since);
     if (!fresh.length) return;
+    for (const c of fresh) live.seen.add(c.id);
     live.pending.push(...fresh);
     paintLive();
 }
@@ -2368,9 +2396,10 @@ async function pollLive() {
 function showLiveComments() {
     const list = document.getElementById('comments');
     for (const c of live.pending) {
+        if (document.getElementById('c_' + c.id)) continue; // loaded meanwhile (by "load more")
         const copy = { ...c, replies: '' }; // its replies come as their own pending entries
         const parent = c.parent_id && c.parent_id.startsWith('t1_') ? document.getElementById('c_' + c.parent_id.slice(3)) : null;
-        if (c.parent_id && c.parent_id.startsWith('t1_') && !parent) continue; // its thread isn't loaded here
+        if (c.parent_id && c.parent_id.startsWith('t1_') && !parent) continue; // its thread isn't loaded here (it stays seen)
         const node = commentNode(copy, parent ? Number(parent.dataset.depth) + 1 : 0, state.post);
         node.classList.add('new');
         if (parent) parent.querySelector(':scope > .c-content > .replies').prepend(node);
@@ -2380,7 +2409,6 @@ function showLiveComments() {
     live.pending = [];
     paintLive();
 }
-
 // ---- Thread summaries ------------------------------------------------------------------------------
 
 /** ✨ Summarize: a short summary by Claude (shown once an API key is set in Preferences). */
@@ -2705,10 +2733,13 @@ function paintLater(data) {
                 ? el('ul', { class: 'later-items' }, data.reminders.map(r => el('li', null,
                     el('div', { class: 'later-main' },
                         el('a', { class: 'plain later-title', href: r.permalink }, r.title || 'A post'),
-                        el('div', { class: 'muted' }, r.sub ? `r/${r.sub} · ` : '', '⏰ ', whenLabel(r.due))),
+                        el('div', { class: 'muted' }, r.sub ? `r/${r.sub} · ` : '', r.fired ? el('b', null, '⏰ Due now') : ['⏰ ', whenLabel(r.due)])),
                     el('div', { class: 'later-actions' },
-                        action('Open', () => send({ type: 'open', url: r.permalink })),
-                        action('Cancel', () => cancel(r.id))))))
+                        action('Open', () => {
+                            send({ type: 'open', url: r.permalink });
+                            if (r.fired) cancel(r.id); // seen to: off the list
+                        }),
+                        action(r.fired ? 'Dismiss' : 'Cancel', () => cancel(r.id))))))
                 : el('p', { class: 'muted' }, 'No reminders. Use ⏰ Remind me on a post (or right-click it in the list) to be reminded about it later.')),
         el('section', { class: 'community-section' },
             el('h2', null, `Scheduled posts (${data.scheduled.length})`),
@@ -2720,11 +2751,12 @@ function paintLater(data) {
                         p.otherAccount && el('div', { class: 'muted' }, `Waiting for you to switch to u/${p.user}.`),
                         p.error && el('div', { class: 'error-text' }, `Didn't go out: ${p.error}`)),
                     el('div', { class: 'later-actions' },
-                        !p.otherAccount && action(p.error ? 'Try again' : 'Post now', () => {
+                        p.posting && el('span', { class: 'muted' }, 'Posting now…'),
+                        !p.otherAccount && !p.posting && action(p.error ? 'Try again' : 'Post now', () => {
                             send({ type: 'laterPostNow', id: p.id });
                             showToast('Posting…');
                         }),
-                        action('Cancel', () => cancel(p.id))))))
+                        !p.posting && action('Cancel', () => cancel(p.id))))))
                 : el('p', { class: 'muted' }, 'Nothing scheduled. In New post, use 🕒 Post later… to pick a time. Skein posts it then, as long as it\'s running (the tray counts).')));
 }
 
@@ -2862,14 +2894,15 @@ async function renderModmail(folder) {
         el('div', { class: 'folder-tabs' }, MODMAIL_FOLDERS.map(([value, label]) =>
             el('button', { class: 'action' + (value === folder ? ' on' : ''), onclick: () => renderModmail(value) }, label))),
         list));
+    const view = state.view;
     let data;
     try {
         data = await call('modmailList', { state: folder });
     } catch (err) {
-        list.replaceChildren(el('div', { class: 'error' }, `Couldn't load modmail: ${err.message}`));
+        if (state.view === view) list.replaceChildren(el('div', { class: 'error' }, `Couldn't load modmail: ${err.message}`));
         return;
     }
-    if (state.page !== 'modmail') return;
+    if (state.view !== view) return; // another folder or page was opened meanwhile
     const conversations = (data.conversationIds || []).map(id => data.conversations[id]).filter(Boolean);
     if (!conversations.length) {
         list.replaceChildren(el('p', { class: 'muted' }, 'Nothing here.'));
@@ -2897,14 +2930,15 @@ async function openModmail(id, folder) {
     empty.hidden = true;
     state.page = 'modmail';
     root.append(spinner());
+    const view = state.view;
     let data;
     try {
         data = await call('modmailConversation', { id });
     } catch (err) {
-        showError(`Couldn't open that conversation: ${err.message}`);
+        if (state.view === view) showError(`Couldn't open that conversation: ${err.message}`);
         return;
     }
-    paintModmail(data, folder);
+    if (state.view === view) paintModmail(data, folder);
 }
 
 function paintModmail(data, folder) {
@@ -2941,9 +2975,11 @@ function paintModmail(data, folder) {
         sendButton.disabled = true;
         status.textContent = 'Sending…';
         try {
+            const view = state.view;
             const result = await call('modmailReply', { id: c.id, body, hidden: hide.checked, internal: internal.checked });
-            paintModmail(result.conversation ? result : await call('modmailConversation', { id: c.id }), folder);
             showToast(internal.checked ? 'Note added' : 'Reply sent');
+            const updated = result.conversation ? result : await call('modmailConversation', { id: c.id });
+            if (state.view === view) paintModmail(updated, folder); // unless you've moved on
         } catch (err) {
             status.textContent = err.message;
             sendButton.disabled = false;
@@ -2955,10 +2991,11 @@ function paintModmail(data, folder) {
         el('div', { class: 'actions' },
             action('← Modmail', () => renderModmail(folder || 'all')),
             action(archived ? '📤 Unarchive' : '📥 Archive', async () => {
+                const view = state.view;
                 try {
                     await call('modmailArchive', { id: c.id, archive: !archived });
                     showToast(archived ? 'Moved back to the inbox' : 'Archived');
-                    renderModmail(folder || 'all');
+                    if (state.view === view) renderModmail(folder || 'all');
                 } catch (err) {
                     showToast(err.message);
                 }
@@ -3023,8 +3060,10 @@ function renderCommunity(m) {
 async function openWiki(sub, page) {
     clearView();
     showLoading();
+    const view = state.view;
     try {
         const wiki = await call('wiki', { sub, page });
+        if (state.view !== view) return; // you've opened something else meanwhile
         const data = (wiki && wiki.data) || {};
         clearView();
         empty.hidden = true;
@@ -3537,6 +3576,9 @@ document.addEventListener('mouseup', e => {
 window.addEventListener('wheel', () => { if (autoScroll.active) stopAutoScroll(); }, { passive: true });
 window.addEventListener('blur', () => { if (autoScroll.active) stopAutoScroll(); });
 
+/** The key for one of Skein's shortcuts (you can change them in Keyboard shortcuts). */
+const keyFor = (id, standard) => (state.settings.keys && state.settings.keys[id]) || standard;
+
 const NATIVE_KEYS = new Set([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End']);
 
 document.addEventListener('keydown', e => {
@@ -3577,20 +3619,19 @@ document.addEventListener('keydown', e => {
         closePanel();
         return;
     }
-    if (!e.ctrlKey && e.key === 'N') {
+    // These are handled right here, no round trip needed (with the keys you've set in Skein).
+    if (!e.ctrlKey && e.key === keyFor('nextNew', 'N')) {
         nextNewComment();
         e.preventDefault();
         return;
     }
-    if (!e.ctrlKey && e.key === 'P') {
+    if (!e.ctrlKey && e.key === keyFor('nextOp', 'P')) {
         nextOpComment();
         e.preventDefault();
         return;
     }
-
-    // Comment navigation is handled right here; no round trip needed.
-    if (!e.ctrlKey && (e.key === 'J' || e.key === 'K')) {
-        navigateComments(e.key === 'J' ? 1 : -1);
+    if (!e.ctrlKey && (e.key === keyFor('nextComment', 'J') || e.key === keyFor('previousComment', 'K'))) {
+        navigateComments(e.key === keyFor('nextComment', 'J') ? 1 : -1);
         e.preventDefault();
         return;
     }

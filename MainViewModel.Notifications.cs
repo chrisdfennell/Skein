@@ -127,7 +127,8 @@ public sealed partial class MainViewModel
     // ---- Reminders and scheduled posts ----------------------------------------------------------
 
     readonly DispatcherTimer _laterTimer = new() { Interval = TimeSpan.FromSeconds(30) };
-    bool _postingScheduled;
+    /// <summary>The scheduled post going out right now, if any.</summary>
+    string? _postingId;
 
     Window ActiveWindow => Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? Application.Current.MainWindow;
 
@@ -160,18 +161,23 @@ public sealed partial class MainViewModel
     async Task CheckLaterAsync()
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var due = Settings.Reminders.Where(r => r.Due <= now).OrderBy(r => r.Due).ToList();
+        // Due reminders get a notification and stay listed (as due) on the Reminders page until
+        // you open or dismiss them, so several at once (after a weekend off, say) aren't lost.
+        var due = Settings.Reminders.Where(r => r.Due <= now && !r.Fired).OrderBy(r => r.Due).ToList();
+        var stale = Settings.Reminders.RemoveAll(r => r.Fired && r.Due < now - 7 * 86400) > 0; // a week after: tidied away
         if (due.Count > 0)
         {
-            Settings.Reminders.RemoveAll(r => r.Due <= now);
-            Settings.Save();
-            foreach (var reminder in due.Take(3))
+            foreach (var reminder in due) reminder.Fired = true;
+            foreach (var reminder in due.Take(due.Count > 3 ? 2 : 3))
                 ReminderNotification?.Invoke("⏰ Reminder" + (reminder.Subreddit.Length > 0 ? $" · r/{reminder.Subreddit}" : ""),
                     reminder.Title, reminder.Permalink, true);
-            Status = due.Count == 1 ? $"⏰ Reminder: {due[0].Title}" : $"⏰ {due.Count} reminders are due.";
+            if (due.Count > 3)
+                ReminderNotification?.Invoke($"⏰ {due.Count - 2} more reminders", "They're waiting on the Reminders page.", "later", false);
+            Status = due.Count == 1 ? $"⏰ Reminder: {due[0].Title}" : $"⏰ {due.Count} reminders are due. See ⏰ Reminders.";
             _detail.RefreshSettings();
             _detail.RefreshLater();
         }
+        if (due.Count > 0 || stale) Settings.Save();
         if (!_isReady) return;
         foreach (var post in Settings.ScheduledPosts.Where(p => p.Due <= now && p.Error == null && p.Profile == Settings.ActiveProfile).ToList())
             await PostScheduledAsync(post.Id, now: false);
@@ -181,14 +187,15 @@ public sealed partial class MainViewModel
     async Task PostScheduledAsync(string id, bool now)
     {
         var post = Settings.ScheduledPosts.FirstOrDefault(p => p.Id == id);
-        if (post == null || _postingScheduled) return;
+        if (post == null || _postingId != null) return;
         if (post.Profile != Settings.ActiveProfile)
         {
             if (now) Status = $"That post is for u/{post.UserName}. Switch to that account and it'll go out.";
             return;
         }
         if (!_isReady) return;
-        _postingScheduled = true;
+        _postingId = id;
+        _detail.RefreshLater(); // shows it as posting, without Cancel
         try
         {
             Status = $"Posting your scheduled post “{post.Title}”…";
@@ -207,7 +214,7 @@ public sealed partial class MainViewModel
         }
         finally
         {
-            _postingScheduled = false;
+            _postingId = null;
             Settings.Save();
             _detail.RefreshLater();
         }
@@ -233,6 +240,13 @@ public sealed partial class MainViewModel
     /// <summary>A notification was clicked: a link, or "later" for the Reminders page.</summary>
     public void OpenNotificationTarget(string target)
     {
+        // Opening a due reminder's post settles it.
+        if (Settings.Reminders.RemoveAll(r => r.Fired && r.Permalink == target) > 0)
+        {
+            Settings.Save();
+            _detail.RefreshSettings();
+            _detail.RefreshLater();
+        }
         if (target is "later" or "alerts" or "inbox") OpenFeed(target, newTab: false);
         else OpenUrl(target);
     }

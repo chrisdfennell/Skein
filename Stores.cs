@@ -577,9 +577,20 @@ static class ApiLog
 
     public static string Clip(string body)
     {
+        // A web page: its words, not its markup (that's what says why Reddit sent it).
+        if (body.TrimStart().StartsWith('<'))
+        {
+            body = System.Text.RegularExpressions.Regex.Replace(body, @"<(style|script)[^>]*>.*?</\1>", " ", System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            body = "(page) " + System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(body, "<[^>]+>", " "));
+            body = System.Text.RegularExpressions.Regex.Replace(body, @"\s+", " ").Trim();
+        }
         var flat = body.ReplaceLineEndings(" ");
         return flat.Length > 300 ? flat[..300] + "…" : flat;
     }
+
+    /// <summary>A URL's path without its query (queries can carry search words, which don't belong in a log).</summary>
+    public static string PathOf(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.AbsolutePath : "(url)";
 }
 
 /// <summary>Everything feeds and the detail view share.</summary>
@@ -606,6 +617,7 @@ public sealed class Services
     public SubscriptionCache SubscriptionCache { get; } = new();
     public CommunityVisits CommunityVisits { get; } = new();
     public AlertStore Alerts { get; } = new();
+    public HistoryStore History { get; } = new();
     public UserNotes UserNotes { get; } = new();
 
     /// <summary>Communities you moderate (loaded after sign-in).</summary>

@@ -167,6 +167,12 @@ public sealed class AppSettings
     /// <summary>How each community was last sorted (lower-cased name → "new" or "top:week"); Hot isn't stored.</summary>
     public Dictionary<string, string> CommunitySorts { get; set; } = [];
 
+    /// <summary>Single-key shortcuts you've changed (action → key); see <see cref="KeyMap"/>.</summary>
+    public Dictionary<string, string> KeyBindings { get; set; } = [];
+
+    /// <summary>The welcome tour has been shown.</summary>
+    public bool WelcomeShown { get; set; }
+
     /// <summary>Searches kept in the sidebar.</summary>
     public List<SavedSearch> SavedSearches { get; set; } = [];
 

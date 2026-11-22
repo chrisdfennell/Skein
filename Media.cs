@@ -160,19 +160,22 @@ public static partial class MediaDownloader
     public static async Task<string?> DownloadToAsync(string url, string pathWithoutExtension, CancellationToken ct)
     {
         string? path = null;
+        // A stalled download gives up rather than hanging (the client's timeout stops counting once the headers arrive).
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        stall.CancelAfter(TimeSpan.FromMinutes(10));
         try
         {
-            using var res = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var res = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token);
             if (!res.IsSuccessStatusCode) return null;
             var extension = ExtensionFor(url, res.Content.Headers.ContentType?.MediaType);
             path = UniquePath(pathWithoutExtension + extension);
             await using (var file = File.Create(path))
-                await res.Content.CopyToAsync(file, ct);
+                await res.Content.CopyToAsync(file, stall.Token);
             return path;
         }
-        catch (Exception) when (!ct.IsCancellationRequested)
+        catch (Exception)
         {
-            // Don't leave a truncated file behind.
+            // Don't leave a truncated file behind, whether it failed, stalled or was cancelled.
             try
             {
                 if (path != null) File.Delete(path);
@@ -181,6 +184,7 @@ public static partial class MediaDownloader
             {
                 // Best-effort.
             }
+            if (ct.IsCancellationRequested) throw;
             return null;
         }
     }
@@ -224,8 +228,24 @@ public static partial class MediaDownloader
                 // Already exited.
             }
         });
-        await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
+        try
+        {
+            await process.StandardError.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped part-way: don't leave a half-merged file.
+            try
+            {
+                if (File.Exists(merged)) File.Delete(merged);
+            }
+            catch
+            {
+                // ffmpeg may still be letting go of it.
+            }
+            throw;
+        }
         if (process.ExitCode != 0 || !File.Exists(merged))
             return (videoFile, "Couldn't merge video and sound with ffmpeg; both files were kept.");
 

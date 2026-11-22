@@ -28,6 +28,8 @@ public partial class App : Application
         };
         UpdateService.CleanUpAfterPortableUpdate();
         Accessibility.Start();
+        // Keep the picture cache to size (in the background; it can be a few thousand files).
+        Task.Run(() => ImageCache.Trim());
         // Apply the saved theme before the window appears, to avoid a flash of the wrong one.
         Appearance.ApplyToApp(AppSettings.Load());
         base.OnStartup(e);

@@ -323,11 +323,12 @@ try {
   };
   // Live threads: the comments the page doesn't have yet, parents before their replies.
   const liveListing = { data: { children: [
-    { kind: 't1', data: { id: 'n1', replies: { data: { children: [{ kind: 't1', data: { id: 'n2', replies: '' } }] } } } },
-    { kind: 't1', data: { id: 'c1', replies: '' } },
+    { kind: 't1', data: { id: 'n1', created_utc: 200, replies: { data: { children: [{ kind: 't1', data: { id: 'n2', created_utc: 210, replies: '' } }] } } } },
+    { kind: 't1', data: { id: 'c1', created_utc: 150, replies: '' } },
+    { kind: 't1', data: { id: 'old', created_utc: 50, replies: '' } }, // posted before live started: not new
     { kind: 'more', data: { id: 'zz' } },
   ] } };
-  result.liveUnseen = unseenComments(liveListing, id => id === 'c1').map(c => c.id).join(',');
+  result.liveUnseen = unseenComments(liveListing, id => id === 'c1', 100).map(c => c.id).join(',');
   // ✨ Summarize only once a key is set; symbol buttons are named for screen readers; your font and CSS apply.
   state.settings.summaries = false;
   const summaryOff = summarizeButton({ id: 'x' }).hidden;

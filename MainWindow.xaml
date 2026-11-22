@@ -12,7 +12,6 @@
     <Window.Resources>
         <local:VisibilityConverter x:Key="Vis" />
         <local:VisibilityConverter x:Key="InvVis" Invert="True" />
-        <local:UrlToImageConverter x:Key="UrlToImage" />
         <local:HasValueConverter x:Key="HasValue" />
         <SolidColorBrush x:Key="Downvote" Color="#7193FF" />
         <SolidColorBrush x:Key="Divider" Color="#40808080" />
@@ -111,7 +110,7 @@
                 <Border CornerRadius="10" ClipToBounds="True"
                         Visibility="{Binding HasIcon, Converter={StaticResource Vis}}">
                     <Border.Background>
-                        <ImageBrush ImageSource="{Binding Icon, Converter={StaticResource UrlToImage}, ConverterParameter=40}"
+                        <ImageBrush local:ImageCache.Url="{Binding Icon}" local:ImageCache.DecodeWidth="40"
                                     Stretch="UniformToFill" />
                     </Border.Background>
                 </Border>
@@ -271,7 +270,7 @@
 
         <!-- Large hover preview for thumbnails. -->
         <ToolTip x:Key="ImagePreview" x:Shared="False" Placement="Right" Padding="4" MaxWidth="600">
-            <Image Source="{Binding PreviewImage, Converter={StaticResource UrlToImage}, ConverterParameter=560}"
+            <Image local:ImageCache.Url="{Binding PreviewImage}" local:ImageCache.DecodeWidth="560"
                    MaxWidth="560" MaxHeight="560" Stretch="Uniform" />
         </ToolTip>
 
@@ -345,7 +344,7 @@
                         ToolTipService.InitialShowDelay="250"
                         Visibility="{Binding Thumbnail, Converter={StaticResource Vis}}">
                     <Image x:Name="Thumb" Stretch="UniformToFill"
-                           Source="{Binding Thumbnail, Converter={StaticResource UrlToImage}, ConverterParameter=144}" />
+                           local:ImageCache.Url="{Binding Thumbnail}" local:ImageCache.DecodeWidth="144" />
                 </Border>
 
                 <StackPanel Grid.Column="2">
@@ -392,7 +391,7 @@
                     <Border Margin="0,10,0,0" CornerRadius="8" ClipToBounds="True" HorizontalAlignment="Stretch"
                             Visibility="{Binding PreviewImage, Converter={StaticResource Vis}}">
                         <Image x:Name="Preview" MaxHeight="460" Stretch="Uniform"
-                               Source="{Binding PreviewImage, Converter={StaticResource UrlToImage}, ConverterParameter=640}" />
+                               local:ImageCache.Url="{Binding PreviewImage}" local:ImageCache.DecodeWidth="640" />
                     </Border>
                     <TextBlock Text="{Binding CardText}" TextWrapping="Wrap" Margin="0,8,0,0" MaxHeight="110"
                                TextTrimming="CharacterEllipsis" Opacity="0.85"
@@ -436,7 +435,7 @@
                                    Visibility="{Binding PreviewImage, Converter={StaticResource InvVis}}" />
                         <Image x:Name="Preview" Stretch="UniformToFill"
                                ToolTip="{StaticResource ImagePreview}" ToolTipService.InitialShowDelay="400"
-                               Source="{Binding PreviewImage, Converter={StaticResource UrlToImage}, ConverterParameter=320}"
+                               local:ImageCache.Url="{Binding PreviewImage}" local:ImageCache.DecodeWidth="320"
                                Visibility="{Binding PreviewImage, Converter={StaticResource Vis}}" />
                         <TextBlock Text="{Binding ScoreText}" FontSize="11" FontWeight="Bold" Foreground="White"
                                    Background="#99000000" Padding="6,1" Margin="6"
@@ -817,6 +816,15 @@
                                                Visibility="{Binding LibraryQuery, Converter={StaticResource InvVis}}" />
                                 </Grid>
                             </DockPanel>
+
+                            <!-- History: search what you've opened. -->
+                            <Grid Grid.Row="1" Margin="10,8" Visibility="{Binding IsHistory, Converter={StaticResource Vis}}">
+                                <TextBox Text="{Binding LibraryQuery, UpdateSourceTrigger=PropertyChanged, Delay=300}"
+                                         VerticalContentAlignment="Center" AutomationProperties.Name="Search posts you've opened" />
+                                <TextBlock Text="🔍 Search posts you've opened: title, community, author or site" Margin="12,0,0,0" VerticalAlignment="Center"
+                                           Opacity="0.5" IsHitTestVisible="False"
+                                           Visibility="{Binding LibraryQuery, Converter={StaticResource InvVis}}" />
+                            </Grid>
 
                             <ProgressBar Grid.Row="2" IsIndeterminate="True" Height="3"
                                          Visibility="{Binding IsLoading, Converter={StaticResource Vis}}" />

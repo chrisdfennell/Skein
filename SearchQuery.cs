@@ -28,6 +28,8 @@ public sealed partial record SearchQuery(string Text, string Author = "", string
         var title = Take(TitleOperator());
         var text = Spaces().Replace(query, " ").Trim();
         var titleOnly = title.Length > 0 && text.Length == 0;
+        // Other words as well: keep the title: part with them, rather than dropping it.
+        if (title.Length > 0 && !titleOnly) text = $"{text} title:\"{title.Replace("\"", "")}\"";
         return new SearchQuery(titleOnly ? title : text, author, flair, site,
             self == "yes" ? "text" : self == "no" ? "links" : "any", titleOnly);
     }

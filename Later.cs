@@ -11,6 +11,9 @@ public sealed class Reminder
 
     /// <summary>When to remind (unix seconds).</summary>
     public long Due { get; set; }
+
+    /// <summary>Its notification went out; it stays listed (as due) until opened or dismissed.</summary>
+    public bool Fired { get; set; }
 }
 
 /// <summary>A text or link post written now and posted later (while Skein is running).</summary>
@@ -115,7 +118,7 @@ public static class LaterTimes
     {
         "1h" => now.AddHours(1),
         "3h" => now.AddHours(3),
-        "evening" => now.Hour < 18 ? now.Date.AddHours(19) : now.Date.AddDays(1).AddHours(19),
+        "evening" => now < now.Date.AddHours(19) ? now.Date.AddHours(19) : now.Date.AddDays(1).AddHours(19),
         "tomorrow" => now.Date.AddDays(1).AddHours(9),
         "weekend" => now.DayOfWeek switch
         {

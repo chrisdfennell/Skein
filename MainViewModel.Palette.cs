@@ -55,6 +55,7 @@ public sealed partial class MainViewModel
             new PaletteItem("⚙", "Preferences", "Settings", ShowPreferences),
             new PaletteItem("⌨", "Keyboard shortcuts", "?", () => ShortcutsCommand.Execute(null)),
             new PaletteItem("🐞", "Report a problem", "Help", ShowReportProblem),
+            new PaletteItem("👋", "Welcome tour", "Help", ShowWelcome),
         ]);
         foreach (var account in Accounts.Where(a => a.Profile != ActiveProfile && a.UserName.Length > 0))
             items.Add(new PaletteItem("👤", $"Switch to u/{account.UserName}", "Account", () => SwitchAccount(account.Profile)));

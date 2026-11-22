@@ -2,9 +2,16 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ThemeMode="System"
+             ShutdownMode="OnMainWindowClose"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!-- Replaced at runtime by the accent chosen in Preferences. -->
-        <SolidColorBrush x:Key="Accent" Color="#FF4500" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- The look shared by Skein's dialogs (cards, titles, descriptions…). -->
+                <ResourceDictionary Source="Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- Replaced at runtime by the accent chosen in Preferences. -->
+            <SolidColorBrush x:Key="Accent" Color="#FF4500" />
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

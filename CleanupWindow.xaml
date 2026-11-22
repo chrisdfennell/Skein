@@ -2,62 +2,76 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:Skein"
-        Title="Clean up subscriptions" Width="680" Height="640" MinWidth="520" MinHeight="420"
+        Title="Clean up subscriptions" Width="720" Height="680" MinWidth="560" MinHeight="460"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
-    <DockPanel Margin="20">
-        <TextBlock DockPanel.Dock="Top" Text="Communities you might not need any more" FontSize="16" FontWeight="SemiBold" />
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Opacity="0.8" Margin="0,6,0,0"
-                   Text="Skein first looks for communities that are banned, deleted, private or quarantined. &quot;Check activity&quot; then looks at when each community last had a post, smallest communities first. Nothing is changed until you unsubscribe." />
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Style="{StaticResource ButtonBar}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="UnsubscribeButton" Content="Unsubscribe" MinWidth="140" Click="OnUnsubscribe" IsEnabled="False"
+                            Style="{DynamicResource AccentButtonStyle}" />
+                    <Button Content="Close" MinWidth="96" Margin="8,0,0,0" IsCancel="True" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Select all" Click="OnSelectAll" />
+                    <Button Content="Select none" Margin="8,0,0,0" Click="OnSelectNone" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
 
-        <DockPanel DockPanel.Dock="Top" Margin="0,14,0,0">
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <TextBlock Text="Quiet for" VerticalAlignment="Center" Margin="0,0,6,0" />
-                <ComboBox x:Name="QuietMonths" MinWidth="110" SelectedIndex="1">
-                    <ComboBoxItem Content="6 months" Tag="6" />
-                    <ComboBoxItem Content="1 year" Tag="12" />
-                    <ComboBoxItem Content="2 years" Tag="24" />
-                </ComboBox>
+        <DockPanel Margin="24,20,24,12">
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock Text="🧹 Clean up subscriptions" Style="{StaticResource DialogTitle}" />
+                <TextBlock Style="{StaticResource PageIntro}"
+                           Text="Communities you might not need any more. Banned, deleted, private and quarantined ones are listed straight away; Check activity also finds ones that have gone quiet. Nothing changes until you unsubscribe." />
             </StackPanel>
-            <StackPanel Orientation="Horizontal">
-                <Button x:Name="CheckButton" Content="Check activity" Click="OnCheckActivity"
-                        Style="{DynamicResource AccentButtonStyle}" />
-                <Button x:Name="StopButton" Content="Stop" Margin="8,0,0,0" Click="OnStop" Visibility="Collapsed" />
-            </StackPanel>
+
+            <Border DockPanel.Dock="Top" Style="{StaticResource Card}">
+                <StackPanel>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Quiet for" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <ComboBox x:Name="QuietMonths" MinWidth="120" SelectedIndex="1" AutomationProperties.Name="Quiet for">
+                                <ComboBoxItem Content="6 months" Tag="6" />
+                                <ComboBoxItem Content="1 year" Tag="12" />
+                                <ComboBoxItem Content="2 years" Tag="24" />
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="CheckButton" Content="Check activity" Click="OnCheckActivity"
+                                    Style="{DynamicResource AccentButtonStyle}" />
+                            <Button x:Name="StopButton" Content="Stop" Margin="8,0,0,0" Click="OnStop" Visibility="Collapsed" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock x:Name="Progress" Style="{StaticResource Help}" Margin="0,10,0,0" />
+                    <ProgressBar x:Name="ProgressBar" Height="3" Margin="0,8,0,0" Visibility="Collapsed" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Padding="6">
+                <ListBox x:Name="List" HorizontalContentAlignment="Stretch" Background="Transparent" BorderThickness="0"
+                         VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.ScrollUnit="Pixel"
+                         AutomationProperties.Name="Communities to clean up">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type local:CleanupCandidate}">
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="2*" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="2" Text="{Binding MembersText}" VerticalAlignment="Center" Opacity="0.7" />
+                                <TextBlock Grid.Column="3" Text="{Binding Reason}" ToolTip="{Binding Reason}" VerticalAlignment="Center"
+                                           Opacity="0.85" TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
         </DockPanel>
-        <TextBlock DockPanel.Dock="Top" x:Name="Progress" Margin="0,10,0,0" Opacity="0.8" TextWrapping="Wrap" />
-        <ProgressBar DockPanel.Dock="Top" x:Name="ProgressBar" Height="3" Margin="0,6,0,0" Visibility="Collapsed" />
-
-        <DockPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
-            <StackPanel Orientation="Horizontal">
-                <Button Content="Select all" Click="OnSelectAll" />
-                <Button Content="Select none" Margin="8,0,0,0" Click="OnSelectNone" />
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="UnsubscribeButton" Content="Unsubscribe" MinWidth="140" Click="OnUnsubscribe" IsEnabled="False" />
-                <Button Content="Close" MinWidth="80" Margin="8,0,0,0" IsCancel="True" />
-            </StackPanel>
-        </DockPanel>
-
-        <ListBox x:Name="List" Margin="0,10,0,0" HorizontalContentAlignment="Stretch"
-                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.ScrollUnit="Pixel">
-            <ListBox.ItemTemplate>
-                <DataTemplate DataType="{x:Type local:CleanupCandidate}">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="90" />
-                            <ColumnDefinition Width="2*" />
-                        </Grid.ColumnDefinitions>
-                        <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" Margin="0,0,4,0" />
-                        <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock Grid.Column="2" Text="{Binding MembersText}" VerticalAlignment="Center" Opacity="0.7" />
-                        <TextBlock Grid.Column="3" Text="{Binding Reason}" ToolTip="{Binding Reason}" VerticalAlignment="Center"
-                                   Opacity="0.85" TextTrimming="CharacterEllipsis" />
-                    </Grid>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
     </DockPanel>
 </Window>

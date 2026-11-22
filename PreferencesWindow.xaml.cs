@@ -103,6 +103,7 @@ public partial class PreferencesWindow : Window
         ReadingFont.SelectedItem = ReadingFont.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == settings.ReadingFont)
                                    ?? ReadingFont.Items[0];
         CustomCss.Text = settings.CustomCss;
+        ShowCacheSize();
         SetUpPages();
     }
 
@@ -116,11 +117,15 @@ public partial class PreferencesWindow : Window
         ForgetKey.IsEnabled = saved;
     }
 
+    /// <summary>Forget key was clicked: done on Save (Cancel keeps the key).</summary>
+    bool _forgetKey;
+
     void OnForgetKey(object sender, RoutedEventArgs e)
     {
-        _settings.SummaryKey = "";
+        _forgetKey = true;
         SummaryKey.Password = "";
-        ShowSummaryKeyState();
+        SummaryStatus.Text = "The key will be forgotten when you save.";
+        ForgetKey.IsEnabled = false;
     }
 
     static readonly (string Code, string Name)[] Languages =
@@ -260,6 +265,20 @@ public partial class PreferencesWindow : Window
         if (dialog.ShowDialog(this) == true) DownloadFolder.Text = dialog.FolderName;
     }
 
+    void ShowCacheSize()
+    {
+        var mb = ImageCache.SizeOnDisk() / 1024.0 / 1024.0;
+        CacheSize.Text = $"Thumbnails and previews kept on this PC so feeds load faster and use less data: {mb:0.#} MB " +
+                         $"(it keeps itself under {ImageCache.MaxBytes / 1024 / 1024} MB).";
+        ClearCache.IsEnabled = mb > 0;
+    }
+
+    void OnClearCache(object sender, RoutedEventArgs e)
+    {
+        ImageCache.Clear();
+        ShowCacheSize();
+    }
+
     void OnOpenWebsite(object sender, RoutedEventArgs e)
     {
         try
@@ -354,6 +373,11 @@ public partial class PreferencesWindow : Window
 
     void OnReportProblem(object sender, RoutedEventArgs e) => ReportProblemRequested?.Invoke();
 
+    /// <summary>"Show the welcome tour" was clicked.</summary>
+    public event Action? WelcomeRequested;
+
+    void OnShowWelcome(object sender, RoutedEventArgs e) => WelcomeRequested?.Invoke();
+
     // ---- Links from other apps ------------------------------------------------------------------
 
     void ShowLinkHandlerStatus()
@@ -429,6 +453,7 @@ public partial class PreferencesWindow : Window
         _settings.KeywordFilters = Lines(Keywords.Text);
         _settings.DomainFilters = Lines(Domains.Text);
         _settings.SubredditFilters = Lines(Subreddits.Text);
+        if (_forgetKey) _settings.SummaryKey = "";
         if (SummaryKey.Password.Trim().Length > 0) _settings.SummaryKey = KeyStore.Protect(SummaryKey.Password.Trim());
         _settings.SummaryModel = (SummaryModel.SelectedItem as ComboBoxItem)?.Tag as string ?? ThreadSummarizer.Models[0].Id;
         _settings.ReadingFont = (ReadingFont.SelectedItem as ComboBoxItem)?.Tag as string ?? "";

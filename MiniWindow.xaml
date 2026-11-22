@@ -7,7 +7,6 @@
         WindowStartupLocation="Manual" ShowInTaskbar="True">
     <Window.Resources>
         <local:VisibilityConverter x:Key="Vis" />
-        <local:UrlToImageConverter x:Key="UrlToImage" />
         <Style x:Key="MiniGlyph" TargetType="Button">
             <Setter Property="MinWidth" Value="32" />
             <Setter Property="Padding" Value="6,2" />
@@ -57,7 +56,7 @@
                             <Border DockPanel.Dock="Left" Width="44" Height="44" CornerRadius="4" ClipToBounds="True" Margin="0,0,8,0"
                                     VerticalAlignment="Top" Visibility="{Binding Thumbnail, Converter={StaticResource Vis}}">
                                 <Image Stretch="UniformToFill"
-                                       Source="{Binding Thumbnail, Converter={StaticResource UrlToImage}, ConverterParameter=88}" />
+                                       local:ImageCache.Url="{Binding Thumbnail}" local:ImageCache.DecodeWidth="88" />
                             </Border>
                             <StackPanel>
                                 <TextBlock x:Name="TitleText" Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold"
